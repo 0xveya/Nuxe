@@ -12,7 +12,13 @@ mise run compiledb
 mise run format
 ```
 
-The executable currently prints `Hello, world!`. `include/nuxe/macros.h` and
+CLI11 2.7.2 is supplied by xrepo as a header-only dependency. `nuxe --help`
+prints usage; unknown arguments produce a diagnostic and nonzero exit code.
+Add typed options with `app.add_option("--name", value, "description")` or
+commands with `app.add_subcommand("name", "description")` before `app.parse` in
+`src/main.cpp`.
+
+The executable currently prints `gleep` and returns 67. `include/nuxe/macros.h` and
 `nuxe.match` are copied from the local shitnet project. The other modules are empty:
 
 - `core`: errors
