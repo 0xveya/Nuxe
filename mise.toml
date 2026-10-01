@@ -1,0 +1,27 @@
+[tools]
+clang = "22.1.5"
+clang-format = "22.1.5"
+
+[tasks.build]
+description = "build nuxe in release mode"
+run = "xmake f -m release -y && xmake build -y"
+
+[tasks.dev]
+description = "build nuxe in debug mode"
+run = "xmake f -m debug -y && xmake build -y"
+
+[tasks.run]
+description = "build and run nuxe"
+run = "xmake build -y && xmake run nuxe"
+
+[tasks.compiledb]
+description = "generate compile_commands.json for clangd"
+run = "xmake build -a -y && xmake project -k compile_commands --lsp=clangd"
+
+[tasks.format]
+description = "format C++ modules and sources"
+run = "find include src -type f \\( -name '*.h' -o -name '*.cpp' -o -name '*.cppm' \\) -print0 | xargs -0 clang-format -i"
+
+[tasks.clean]
+description = "remove generated build files"
+run = "xmake clean -a"

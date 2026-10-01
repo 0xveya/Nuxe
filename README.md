@@ -1,27 +1,29 @@
-# Nuxe
+# nuxe
 
-A gamedata unpacker and loose-loading patcher for FromSoftware games; the spiritual successor to [UXM](https://github.com/JKAnderson/UXM). Please refer to the [Readme](./dist/Readme.txt) included with each release for full usage instructions and changelog.
+C++23 module scaffold for a Linux archive extractor. Uses Clang and Xmake,
+matching the local C++ projects. Xmake must be available on PATH.
 
-Nuxe supports all FromSoftware games that use large BinderLight archives:
+```sh
+mise trust
+mise run dev
+mise run run
+mise run build
+mise run compiledb
+mise run format
+```
 
-- Armored Core V (PS3, X360)
-- Armored Core Verdict Day (PS3, X360)
-- Armored Core VI (PC)
-- Dark Souls (PC, PS3, X360)
-- Dark Souls Remastered (NS)
-- Dark Souls II (PC)
-- Dark Souls II Scholar of the First Sin (PC)
-- Dark Souls III (PC)
-- Elden Ring (PC)
-- Elden Ring Nightreign (PC)
-- Sekiro + Digital Artwork & Mini Soundtrack (PC)
-- Steel Battalion Heavy Armor (X360)
+The executable currently prints `Hello, world!`. `include/nuxe/macros.h` and
+`nuxe.match` are copied from the local shitnet project. The other modules are empty:
 
-Unpacking is available for all games; exe patching is only available for PC games, at the moment.
+- `core`: errors
+- `io`: mapped files and bounded binary reads
+- `format`: BHD5
+- `config`: game configuration
+- `binder`: path hashes and dictionaries
+- `crypto`: header and file decryption
+- `extract`: plans, planning, execution, chunks, and workers
+- `patch`: patch and restore
 
-If you find this tool useful, you can support me on [Ko-fi](https://ko-fi.com/tkgp) or [Patreon](https://www.patreon.com/c/TKGP).
-
-## Libraries
-
-[**BinderKeys**](https://github.com/JKAnderson/BinderKeys) ([License](https://github.com/JKAnderson/BinderKeys?tab=Apache-2.0-1-ov-file))  
-[**Coremats**](https://github.com/JKAnderson/Coremats) ([License](https://github.com/JKAnderson/Coremats?tab=GPL-3.0-1-ov-file))
+The original [JKAnderson/Nuxe](https://github.com/JKAnderson/Nuxe) checkout is in
+`old_code/`, which is ignored by Git. It remains available in the fork's history.
+Parsing, extraction, crypto, and threading are left for later implementation.
