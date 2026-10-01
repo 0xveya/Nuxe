@@ -1,6 +1,9 @@
-#include <cstdio>
 #include <nuxe/macros.h>
+#include <print>
 
 import nuxe;
 
-fn main() -> int { return std::puts("Hello, world!") < 0 ? 1 : 0; }
+fn main() -> int {
+    std::println("gleep");
+    return 67;
+}
