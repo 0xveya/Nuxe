@@ -8,6 +8,8 @@ module;
 #include <system_error>
 #include <variant>
 
+#include <nuxe/macros.h>
+
 export module nuxe.error;
 
 export namespace nuxe {
@@ -39,8 +41,14 @@ struct invalid_magic {
     std::array<std::byte, 4> actual;
 };
 
-using error =
-    std::variant<io_error, truncated_input, invalid_offset, invalid_magic>;
+// TODO: tell agent to add docstring to ts
+struct invalid_header {
+
+    std::size_t offset;
+};
+
+using error = std::variant<io_error, truncated_input, invalid_offset,
+                           invalid_magic, invalid_header>;
 
 /// A value or a typed failure, including operations with no return value.
 template <class T> using result = std::expected<T, error>;

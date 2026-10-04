@@ -36,6 +36,7 @@ add_cxxflags("-Wpedantic", "-Wconversion", "-Wshadow", { tools = { "gcc", "clang
 
 target("nuxe")
     set_kind("binary")
+    set_rundir(os.projectdir())
     add_packages("cli11", "nlohmann_json_modules")
     add_files("src/**.cppm", { public = true })
     add_files("src/**.cpp")
