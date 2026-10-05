@@ -52,6 +52,11 @@ struct bhd5_header {
     std::string data_salt;
 };
 
+struct bhd5_bucket_record {
+    std::int32_t file_count;
+    std::int64_t files_offset;
+};
+
 template <bhd5_format Format>
 fn read_path_hash(reader &input) -> result<std::uint64_t> {
     if constexpr (Format == bhd5_format::elden_ring) {
@@ -178,6 +183,103 @@ fn parse_bhd5_header(std::span<const std::byte> bytes) -> result<bhd5_header> {
     }
 
     return header;
+}
+
+template <bhd5_format Format>
+fn read_bucket_record(reader &input) -> result<bhd5_bucket_record> {
+    const let record_offset = input.position();
+    let record = bhd5_bucket_record{};
+
+    const let count = input.read<std::int32_t>();
+    if (!count)
+        return std::unexpected(count.error());
+    if (*count < 0)
+        return std::unexpected(invalid_header{record_offset});
+
+    record.file_count = *count;
+
+    if constexpr (Format == bhd5_format::dark_souls_remastered) {
+        const let marker = input.read<std::int32_t>();
+        if (!marker)
+            return std::unexpected(marker.error());
+        if (*marker != 1)
+            return std::unexpected(invalid_header{record_offset + 4});
+
+        const let offset = input.read<std::int64_t>();
+        if (!offset)
+            return std::unexpected(offset.error());
+        if (*offset < 0)
+            return std::unexpected(invalid_header{record_offset + 8});
+
+        record.files_offset = *offset;
+    } else {
+        const let offset = input.read<std::int32_t>();
+        if (!offset)
+            return std::unexpected(offset.error());
+        if (*offset < 0)
+            return std::unexpected(invalid_header{record_offset + 4});
+
+        record.files_offset = *offset;
+    }
+
+    return record;
+}
+
+template <bhd5_format Format>
+fn parse_bucket_table(std::span<const std::byte> bytes,
+                      const bhd5_header &header)
+    -> result<std::vector<bhd5_bucket_record>> {
+    if (header.bucket_count < 0)
+        return std::unexpected(invalid_header{16});
+
+    constexpr let offset_field =
+        Format == bhd5_format::dark_souls_remastered ? 24u : 20u;
+
+    if (header.buckets_offset < 0)
+        return std::unexpected(invalid_header{offset_field});
+
+    const let table_offset = static_cast<std::uint64_t>(header.buckets_offset);
+
+    if (table_offset > bytes.size())
+        return std::unexpected(invalid_offset{table_offset, bytes.size()});
+
+    let input = reader{
+        bytes,
+        header.little_endian ? std::endian::little : std::endian::big,
+    };
+
+    const let seek = input.seek(static_cast<std::size_t>(table_offset));
+    if (!seek)
+        return std::unexpected(seek.error());
+
+    constexpr std::size_t record_size =
+        Format == bhd5_format::dark_souls_remastered ? 16 : 8;
+
+    const let count = static_cast<std::size_t>(header.bucket_count);
+    const let available = bytes.size() - input.position();
+
+    // validate before reserving memory from a file-provided count
+    if (count > available / record_size)
+        return std::unexpected(invalid_header{16});
+
+    let records = std::vector<bhd5_bucket_record>{};
+    records.reserve(count);
+
+    for (std::size_t index = 0; index < count; ++index) {
+        const let record = read_bucket_record<Format>(input);
+        if (!record)
+            return std::unexpected(record.error());
+
+        const let files_offset =
+            static_cast<std::uint64_t>(record->files_offset);
+
+        if (files_offset > bytes.size())
+            return std::unexpected(invalid_offset{files_offset, bytes.size()});
+
+        records.emplace_back(record->file_count, record->files_offset);
+    }
+
+    return records;
 }
 
 } // namespace nuxe

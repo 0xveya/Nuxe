@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <nuxe/macros.h>
 #include <print>
@@ -29,10 +30,8 @@ fn main() -> int {
         return 1;
     }
 
-    const let header =
-        nuxe::parse_bhd5_header<nuxe::bhd5_format::dark_souls2>(bytes);
-    if (!header) {
-        match(header.error())(
+    const let print_error = [](const nuxe::error &failure) {
+        match(failure)(
             case_(nuxe::io_error, error) {
                 std::println("I/O error: {}", error.cause.message());
             },
@@ -48,6 +47,19 @@ fn main() -> int {
             case_(nuxe::invalid_header, error) {
                 std::println("invalid header field at {}", error.offset);
             });
+    };
+
+    const let header =
+        nuxe::parse_bhd5_header<nuxe::bhd5_format::dark_souls2>(bytes);
+    if (!header) {
+        print_error(header.error());
+        return 1;
+    }
+
+    const let table = nuxe::parse_bucket_table<nuxe::bhd5_format::dark_souls2>(
+        bytes, *header);
+    if (!table) {
+        print_error(table.error());
         return 1;
     }
 
@@ -59,5 +71,14 @@ fn main() -> int {
         {"data_salt", header->data_salt},
     };
     std::println("{}", output.dump(2));
+
+    let file_count = std::uint64_t{};
+    for (std::size_t index = 0; index < table->size(); ++index) {
+        const let &bucket = (*table)[index];
+        std::println("bucket {}: {} files, offset {}", index, bucket.file_count,
+                     bucket.files_offset);
+        file_count += static_cast<std::uint64_t>(bucket.file_count);
+    }
+    std::println("{} buckets, {} files", table->size(), file_count);
     return 0;
 }
