@@ -7,6 +7,7 @@ module;
 #include <expected>
 #include <span>
 #include <string>
+#include <utility>
 
 #include <nuxe/macros.h>
 #include <vector>
@@ -30,6 +31,8 @@ struct bhd5_file {
     std::uint64_t path_hash;
     std::uint32_t data_length;
     std::uint64_t data_offset;
+    std::uint64_t hash_offset;
+    std::uint64_t encryption_offset;
 };
 
 struct bhd5_bucket {
@@ -258,7 +261,7 @@ fn parse_bucket_table(std::span<const std::byte> bytes,
     const let count = static_cast<std::size_t>(header.bucket_count);
     const let available = bytes.size() - input.position();
 
-    // validate before reserving memory from a file-provided count
+    // validat before reserving memory from a file-provided count
     if (count > available / record_size)
         return std::unexpected(invalid_header{16});
 
@@ -280,6 +283,128 @@ fn parse_bucket_table(std::span<const std::byte> bytes,
     }
 
     return records;
+}
+
+template <bhd5_format Format>
+fn read_file_entry(reader &input) -> result<bhd5_file> {
+    static_assert(Format == bhd5_format::dark_souls2,
+                  "file entry parsing currently supports DS2");
+
+    const let start = input.position();
+    let file = bhd5_file{};
+
+    const let hash = read_path_hash<Format>(input);
+    if (!hash)
+        return std::unexpected(hash.error());
+    file.path_hash = *hash;
+
+    const let length = input.read<std::int32_t>();
+    if (!length)
+        return std::unexpected(length.error());
+    if (*length < 0)
+        return std::unexpected(invalid_header{start + 4});
+    file.data_length = static_cast<std::uint32_t>(*length);
+
+    const let offset = input.read<std::int64_t>();
+    if (!offset)
+        return std::unexpected(offset.error());
+    if (*offset < 0)
+        return std::unexpected(invalid_header{start + 8});
+    file.data_offset = static_cast<std::uint64_t>(*offset);
+
+    const let hash_offset = input.read<std::int64_t>();
+    if (!hash_offset)
+        return std::unexpected(hash_offset.error());
+    if (*hash_offset < 0)
+        return std::unexpected(invalid_header{start + 16});
+    file.hash_offset = static_cast<std::uint64_t>(*hash_offset);
+
+    const let encryption_offset = input.read<std::int64_t>();
+    if (!encryption_offset)
+        return std::unexpected(encryption_offset.error());
+    if (*encryption_offset < 0)
+        return std::unexpected(invalid_header{start + 24});
+    file.encryption_offset = static_cast<std::uint64_t>(*encryption_offset);
+
+    return file;
+}
+
+template <bhd5_format Format>
+fn parse_bucket_files(std::span<const std::byte> bytes,
+                      const bhd5_header &header,
+                      const bhd5_bucket_record &record) -> result<bhd5_bucket> {
+    static_assert(Format == bhd5_format::dark_souls2,
+                  "file entry parsing currently supports DS2");
+
+    let input = reader{
+        bytes,
+        header.little_endian ? std::endian::little : std::endian::big,
+    };
+
+    const let seek = input.seek(static_cast<std::size_t>(record.files_offset));
+    if (!seek)
+        return std::unexpected(seek.error());
+
+    constexpr std::size_t entry_size = 32;
+    const let count = static_cast<std::size_t>(record.file_count);
+    const let available = bytes.size() - input.position();
+
+    if (count > available / entry_size)
+        return std::unexpected(invalid_header{input.position()});
+
+    let bucket = bhd5_bucket{};
+    bucket.files.reserve(count);
+
+    for (std::size_t index = 0; index < count; ++index) {
+        const let file = read_file_entry<Format>(input);
+        if (!file)
+            return std::unexpected(file.error());
+
+        if (file->hash_offset > bytes.size())
+            return std::unexpected(
+                invalid_offset{file->hash_offset, bytes.size()});
+
+        if (file->encryption_offset > bytes.size())
+            return std::unexpected(
+                invalid_offset{file->encryption_offset, bytes.size()});
+
+        bucket.files.push_back(*file);
+    }
+
+    return bucket;
+}
+
+template <bhd5_format Format>
+fn parse_bhd5(std::span<const std::byte> bytes) -> result<bhd5> {
+    static_assert(Format == bhd5_format::dark_souls2,
+                  "file entry parsing currently supports DS2");
+
+    let header = parse_bhd5_header<Format>(bytes);
+    if (!header)
+        return std::unexpected(header.error());
+
+    const let table = parse_bucket_table<Format>(bytes, *header);
+    if (!table)
+        return std::unexpected(table.error());
+
+    let archive = bhd5{
+        Format,
+        header->little_endian,
+        header->unk05,
+        std::move(header->data_salt),
+        {},
+    };
+    archive.buckets.reserve(table->size());
+
+    for (const let &record : *table) {
+        let bucket = parse_bucket_files<Format>(bytes, *header, record);
+        if (!bucket)
+            return std::unexpected(bucket.error());
+
+        archive.buckets.push_back(std::move(*bucket));
+    }
+
+    return archive;
 }
 
 } // namespace nuxe
