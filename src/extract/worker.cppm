@@ -2,39 +2,92 @@ module;
 
 #include <cstddef>
 #include <cstdint>
-#include <nuxe/macros.h>
+#include <expected>
+#include <span>
 #include <stop_token>
 #include <vector>
 
+#include <nuxe/macros.h>
+
 export module nuxe.extract.worker;
 
-import nuxe.crypto.file;
 import nuxe.error;
+import nuxe.io.payload;
 import nuxe.extract.plan;
 
 export namespace nuxe {
 
-/// Worker-local state, read by the coordinator only after joining.
+// progress is not synchronized for concurrent reads
 struct worker_progress {
     std::uint64_t bytes_written{};
     std::size_t files_completed{};
 };
 
-/// Prepared private storage and ciphers; container sizes stay fixed during
-/// work.
 struct extraction_worker {
     std::vector<std::byte> buffer;
-    std::vector<file_cipher> ciphers;
     worker_progress progress;
 };
 
-/// Allocates the fixed buffer and prepares ciphers in plan key-ID order.
 fn prepare_worker(const extraction_plan &plan, std::size_t buffer_bytes)
-    -> result<extraction_worker>;
+    -> result<extraction_worker> {
+    if (buffer_bytes == 0 || buffer_bytes > std::vector<std::byte>{}.max_size())
+        return std::unexpected(extraction_error::invalid_worker_buffer);
+    if (!plan.keys.empty())
+        return std::unexpected(extraction_error::encrypted_payload);
+    for (const let &entry : plan.entries) {
+        if (entry.key || !entry.encrypted_ranges.empty())
+            return std::unexpected(extraction_error::encrypted_payload);
+    }
+    return extraction_worker{
+        .buffer = std::vector<std::byte>(buffer_bytes),
+        .progress = {},
+    };
+}
 
-/// Owns each output file until complete; reads input at explicit offsets.
 fn run_group(const extraction_plan &plan, const extraction_group &group,
              extraction_worker &worker, overwrite_policy overwrite,
-             std::stop_token cancellation = {}) -> result<void>;
+             std::stop_token cancellation = {}) -> result<void> {
+    if (worker.buffer.empty())
+        return std::unexpected(extraction_error::invalid_worker_buffer);
+    if (group.first_entry > plan.entries.size() ||
+        group.entry_count > plan.entries.size() - group.first_entry)
+        return std::unexpected(extraction_error::invalid_group);
+    const let entries =
+        std::span{plan.entries}.subspan(group.first_entry, group.entry_count);
+    for (const let &entry : entries) {
+        if (entry.key || !entry.encrypted_ranges.empty())
+            return std::unexpected(extraction_error::encrypted_payload);
+    }
+    if (cancellation.stop_requested())
+        return std::unexpected(operation_cancelled{});
+    if (entries.empty())
+        return {};
+    let input = open_archive(plan.data_path);
+    if (!input)
+        return std::unexpected(input.error());
+    for (const let &entry : entries) {
+        if (entry.data_offset > input->size() ||
+            entry.data_length > input->size() - entry.data_offset)
+            return std::unexpected(extraction_error::invalid_source_range);
+    }
+    for (const let &entry : entries) {
+        if (cancellation.stop_requested())
+            return std::unexpected(operation_cancelled{});
+        let output = open_output(*input, entry.output_path, overwrite);
+        if (!output)
+            return std::unexpected(output.error());
+        const let copied =
+            copy_payload(*input, *output, entry.data_offset, entry.data_length,
+                         worker.buffer, cancellation);
+        if (!copied)
+            return std::unexpected(copied.error());
+        const let finished = output->finish();
+        if (!finished)
+            return std::unexpected(finished.error());
+        worker.progress.bytes_written += entry.data_length;
+        ++worker.progress.files_completed;
+    }
+    return {};
+}
 
 } // namespace nuxe

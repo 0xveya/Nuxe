@@ -12,56 +12,67 @@ export module nuxe.error;
 
 export namespace nuxe {
 
-enum class io_operation { open, stat, read, map, seek, write };
+enum class io_operation { open, stat, read, map, seek, write, truncate, close };
 
 enum class crypto_operation {
     import_header_key,
+    calculate_header_layout,
     prepare_header_worker,
     decrypt_header,
     prepare_file_cipher,
     decrypt_file_ranges,
 };
 
-/// A crypto failure with its OpenSSL error code, or zero if none is available.
+// zero means OpenSSL supplied no error code
 struct crypto_error {
     crypto_operation operation;
     unsigned long code;
 };
 
-/// A filesystem failure with its original system error.
+struct operation_cancelled {};
+
+struct worker_launch_error {
+    std::error_code cause;
+};
+
 struct io_error {
     io_operation operation;
     std::filesystem::path path;
     std::error_code cause;
 };
 
-/// A read that needs more bytes than remain in the input.
 struct truncated_input {
     std::size_t offset;
     std::size_t requested;
     std::size_t available;
 };
 
-/// An archive offset outside the input's bounds.
 struct invalid_offset {
     std::uint64_t offset;
     std::uint64_t input_size;
 };
 
-/// An unexpected four-byte archive signature.
 struct invalid_magic {
     std::array<std::byte, 4> actual;
 };
 
-/// An invalid value in an archive header or metadata record.
 struct invalid_header {
     std::size_t offset;
 };
 
-using error = std::variant<io_error, truncated_input, invalid_offset,
-                           invalid_magic, invalid_header, crypto_error>;
+enum class extraction_error {
+    encrypted_payload,
+    invalid_source_range,
+    invalid_destination,
+    invalid_worker_buffer,
+    invalid_group,
+};
 
-/// A value or a typed failure, including operations with no return value.
+using error =
+    std::variant<io_error, truncated_input, invalid_offset, invalid_magic,
+                 invalid_header, crypto_error, operation_cancelled,
+                 worker_launch_error, extraction_error>;
+
 template <class T> using result = std::expected<T, error>;
 
 } // namespace nuxe

@@ -1,26 +1,34 @@
 #include <CLI/CLI.hpp>
-#include <cstdio>
 #include <exception>
 #include <nuxe/macros.h>
-#include <print>
 
+import nuxe.cli.diagnostics;
 import nuxe.cli.inspect;
+import nuxe.cli.extract;
 
 fn main(int argc, char **argv) -> int {
-    let app = CLI::App{"FromSoftware archive extractor", "nuxe"};
-    app.require_subcommand(1);
-
-    let exit_code = 0;
-    let inspect = nuxe::cli::inspect_command{};
-    inspect.attach(app, exit_code);
-
+    const let diagnostics = nuxe::cli::diagnostics{};
     try {
-        app.parse(argc, argv);
-        return exit_code;
-    } catch (const CLI::ParseError &error) {
-        return app.exit(error);
+        let app = CLI::App{"FromSoftware archive extractor", "nuxe"};
+        app.require_subcommand(1);
+        let exit_code = 0;
+        let inspect = nuxe::cli::inspect_command{};
+        inspect.attach(app, exit_code, diagnostics);
+        let extract = nuxe::cli::extract_command{};
+        extract.attach(app, exit_code, diagnostics);
+        try {
+            app.parse(argc, argv);
+            return exit_code;
+        } catch (const CLI::ParseError &error) {
+            if (error.get_exit_code() == 0)
+                return app.exit(error);
+            diagnostics.report(
+                error.what(),
+                "run 'nuxe --help' or 'nuxe <command> --help' for usage");
+            return error.get_exit_code();
+        }
     } catch (const std::exception &error) {
-        std::println(stderr, "command failed: {}", error.what());
+        diagnostics.report("command failed", error.what());
         return 1;
     }
 }

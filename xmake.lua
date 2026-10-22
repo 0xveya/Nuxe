@@ -7,7 +7,8 @@ add_rules("mode.debug", "mode.release")
 add_rules("plugin.compile_commands.autoupdate", { outputdir = ".", lsp = "clangd" })
 
 add_requires("cli11 2.7.2", { system = false, configs = { cmake = false } })
--- Pin the upstream module until it is available in the standard Xmake package.
+add_requires("openssl3 >=3.0")
+-- pin the upstream module until Xmake packages it
 package("nlohmann_json_modules")
     set_kind("library", { headeronly = true })
     set_homepage("https://github.com/nlohmann/json")
@@ -37,7 +38,8 @@ add_cxxflags("-Wpedantic", "-Wconversion", "-Wshadow", { tools = { "gcc", "clang
 target("nuxe")
     set_kind("binary")
     set_rundir(os.projectdir())
-    add_packages("cli11", "nlohmann_json_modules")
+    add_packages("cli11", "nlohmann_json_modules", "openssl3")
+    add_syslinks("pthread")
     add_files("src/**.cppm", { public = true })
     add_files("src/**.cpp")
     add_includedirs("include")

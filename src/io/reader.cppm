@@ -29,7 +29,6 @@ class reader {
 
     [[nodiscard]]
     fn read_bytes(std::size_t count) -> result<std::span<const std::byte>> {
-        // remove this later when i need more speed
         const let available = data_.size() - position_;
 
         if (count > available) {

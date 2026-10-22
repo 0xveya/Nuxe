@@ -34,9 +34,6 @@ struct bhd5_header {
 
 template <bhd5_format Format>
 fn parse_bhd5_header(std::span<const std::byte> bytes) -> result<bhd5_header> {
-    // i dont worry abt optmizations yet in future i shoudbt be spamming read
-    // syscall as much tho but first i want sum to work future veya can worry
-    // about makeing it not dogshit slow
     let input = reader(bytes);
     let header = bhd5_header{};
 

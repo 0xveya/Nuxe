@@ -3,21 +3,21 @@ module;
 #include <CLI/CLI.hpp>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <format>
-#include <fstream>
-#include <nuxe/macros.h>
 #include <print>
 #include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <nuxe/macros.h>
+
 export module nuxe.cli.inspect;
 
-import nuxe.error;
+import nuxe.cli.diagnostics;
+import nuxe.cli.header;
+import nuxe.cli.options;
 import nuxe.format.bhd5;
-import nuxe.match;
 import nlohmann.json;
 
 namespace {
@@ -94,60 +94,13 @@ fn inspect_json(const nuxe::bhd5 &archive) -> nlohmann::json {
     };
 }
 
-fn inspect_ds2(const std::string &path) -> int {
-    let file = std::ifstream{path, std::ios::binary | std::ios::ate};
-    if (!file) {
-        std::println(stderr, "could not open {}", path);
+fn inspect_ds2(const std::string &path, const std::string &key_path,
+               std::size_t jobs, const nuxe::cli::diagnostics &diagnostics)
+    -> int {
+    const let archive =
+        nuxe::cli::load_ds2_header(path, key_path, jobs, diagnostics);
+    if (!archive)
         return 1;
-    }
-
-    const let size = static_cast<std::streamoff>(file.tellg());
-    if (size < 0) {
-        std::println(stderr, "could not determine size of {}", path);
-        return 1;
-    }
-
-    let bytes = std::vector<std::byte>(static_cast<std::size_t>(size));
-    file.seekg(0);
-    if (!file.read(reinterpret_cast<char *>(bytes.data()),
-                   static_cast<std::streamsize>(size))) {
-        std::println(stderr, "could not read {}", path);
-        return 1;
-    }
-
-    const let print_error = [](const nuxe::error &failure) {
-        match(failure)(
-            case_(nuxe::crypto_error, error) {
-                std::println(stderr, "crypto operation {} failed: {:#x}",
-                             static_cast<int>(error.operation), error.code);
-            },
-            case_(nuxe::io_error, error) {
-                std::println(stderr, "I/O error: {}", error.cause.message());
-            },
-            case_(nuxe::truncated_input, error) {
-                std::println(stderr,
-                             "truncated input at {}: need {} bytes, have {}",
-                             error.offset, error.requested, error.available);
-            },
-            case_(nuxe::invalid_offset, error) {
-                std::println(stderr, "invalid offset {} for {} bytes",
-                             error.offset, error.input_size);
-            },
-            case_(nuxe::invalid_magic) {
-                std::println(stderr, "invalid BHD5 magic");
-            },
-            case_(nuxe::invalid_header, error) {
-                std::println(stderr, "invalid header field at {}",
-                             error.offset);
-            });
-    };
-
-    const let archive = nuxe::parse_bhd5<nuxe::bhd5_format::dark_souls2>(bytes);
-    if (!archive) {
-        print_error(archive.error());
-        return 1;
-    }
-
     std::println("{}", inspect_json(*archive).dump(2));
     return 0;
 }
@@ -156,17 +109,26 @@ fn inspect_ds2(const std::string &path) -> int {
 
 export namespace nuxe::cli {
 
-/// CLI adapter for inspecting decrypted DS2 BHD5 archives.
 struct inspect_command {
     std::string path;
+    std::string key_path;
+    std::size_t jobs = 1;
 
-    fn attach(CLI::App &app, int &exit_code) -> void {
+    fn attach(CLI::App &app, int &exit_code,
+              const nuxe::cli::diagnostics &diagnostics) -> void {
         let *command = app.add_subcommand(
-            "inspect", "inspect a decrypted Dark Souls 2 BHD5 header");
-        command->add_option("path", path, "path to the decrypted BHD5 file")
+            "inspect", "inspect a Dark Souls 2 BHD5 header as JSON");
+        command
+            ->add_option("path", path,
+                         "path to an encrypted or decrypted DS2 BHD5 file")
             ->required();
-        command->callback(
-            [this, &exit_code] { exit_code = inspect_ds2(path); });
+        command->add_option("--key", key_path,
+                            "matching RSA public key PEM for encrypted input");
+        command->add_option("--jobs", jobs, "maximum RSA workers (default: 1)")
+            ->check(size_option());
+        command->callback([this, &exit_code, &diagnostics] {
+            exit_code = inspect_ds2(path, key_path, jobs, diagnostics);
+        });
     }
 };
 

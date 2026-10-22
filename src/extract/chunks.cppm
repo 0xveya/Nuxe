@@ -12,14 +12,12 @@ import nuxe.extract.plan;
 
 export namespace nuxe {
 
-/// A bounded payload slice whose encrypted portions contain complete AES
-/// blocks.
 struct payload_chunk {
     std::uint64_t file_offset;
     std::size_t size;
 };
 
-/// Selects the next slice; an empty optional means the payload is complete.
+// an empty optional means EOF
 fn next_payload_chunk(const extraction_entry &entry, std::uint64_t file_offset,
                       std::size_t buffer_bytes)
     -> result<std::optional<payload_chunk>>;

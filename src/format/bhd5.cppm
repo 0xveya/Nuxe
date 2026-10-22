@@ -132,7 +132,7 @@ fn parse_bucket_table(std::span<const std::byte> bytes,
     const let count = static_cast<std::size_t>(header.bucket_count);
     const let available = bytes.size() - input.position();
 
-    // validat before reserving memory from a file-provided count
+    // bound untrusted counts before allocating
     if (count > available / record_size)
         return std::unexpected(invalid_header{16});
 
