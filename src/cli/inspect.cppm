@@ -117,6 +117,10 @@ fn inspect_ds2(const std::string &path) -> int {
 
     const let print_error = [](const nuxe::error &failure) {
         match(failure)(
+            case_(nuxe::crypto_error, error) {
+                std::println(stderr, "crypto operation {} failed: {:#x}",
+                             static_cast<int>(error.operation), error.code);
+            },
             case_(nuxe::io_error, error) {
                 std::println(stderr, "I/O error: {}", error.cause.message());
             },

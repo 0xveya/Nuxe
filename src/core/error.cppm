@@ -12,7 +12,21 @@ export module nuxe.error;
 
 export namespace nuxe {
 
-enum class io_operation { open, stat, read, map };
+enum class io_operation { open, stat, read, map, seek, write };
+
+enum class crypto_operation {
+    import_header_key,
+    prepare_header_worker,
+    decrypt_header,
+    prepare_file_cipher,
+    decrypt_file_ranges,
+};
+
+/// A crypto failure with its OpenSSL error code, or zero if none is available.
+struct crypto_error {
+    crypto_operation operation;
+    unsigned long code;
+};
 
 /// A filesystem failure with its original system error.
 struct io_error {
@@ -45,7 +59,7 @@ struct invalid_header {
 };
 
 using error = std::variant<io_error, truncated_input, invalid_offset,
-                           invalid_magic, invalid_header>;
+                           invalid_magic, invalid_header, crypto_error>;
 
 /// A value or a typed failure, including operations with no return value.
 template <class T> using result = std::expected<T, error>;
