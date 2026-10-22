@@ -8,8 +8,6 @@ module;
 #include <system_error>
 #include <variant>
 
-#include <nuxe/macros.h>
-
 export module nuxe.error;
 
 export namespace nuxe {
@@ -41,9 +39,8 @@ struct invalid_magic {
     std::array<std::byte, 4> actual;
 };
 
-// TODO: tell agent to add docstring to ts
+/// An invalid value in an archive header or metadata record.
 struct invalid_header {
-
     std::size_t offset;
 };
 
