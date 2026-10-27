@@ -1,9 +1,12 @@
 module;
 
+#include <algorithm>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <span>
 #include <utility>
+#include <vector>
 
 #include <nuxe/macros.h>
 
@@ -15,12 +18,41 @@ import nuxe.format.bhd5;
 
 export namespace nuxe {
 
+fn prepare_encrypted_ranges(std::span<const bhd5_range> ranges,
+                            std::uint64_t data_length)
+    -> result<std::vector<bhd5_range>> {
+    let prepared = std::vector<bhd5_range>{};
+    prepared.reserve(ranges.size());
+
+    for (const let &range : ranges) {
+        if (range.start == -1 || range.end == -1 || range.start == range.end)
+            continue;
+
+        if (range.start < 0 || range.end < range.start)
+            return std::unexpected(extraction_error::invalid_encryption_range);
+
+        const let start = static_cast<std::uint64_t>(range.start);
+        const let end = static_cast<std::uint64_t>(range.end);
+
+        if (end > data_length || (end - start) % 16 != 0)
+            return std::unexpected(extraction_error::invalid_encryption_range);
+
+        prepared.emplace_back(range);
+    }
+
+    std::ranges::sort(prepared, {}, &bhd5_range::start);
+
+    for (std::size_t index = 1; index < prepared.size(); ++index) {
+        if (prepared[index].start < prepared[index - 1].end)
+            return std::unexpected(extraction_error::invalid_encryption_range);
+    }
+
+    return prepared;
+}
+
 fn plan_file(const bhd5_file &file, std::filesystem::path data_path,
              std::uint64_t data_size, std::filesystem::path output_path)
     -> result<extraction_plan> {
-    if (file.encryption)
-        return std::unexpected(extraction_error::encrypted_payload);
-
     if (file.data_offset > data_size ||
         file.data_length > data_size - file.data_offset)
         return std::unexpected(extraction_error::invalid_source_range);
@@ -52,6 +84,18 @@ fn plan_file(const bhd5_file &file, std::filesystem::path data_path,
         .entry_count = 1,
         .byte_count = file.data_length,
     };
+    if (file.encryption) {
+        let ranges =
+            prepare_encrypted_ranges(file.encryption->ranges, file.data_length);
+        if (!ranges)
+            return std::unexpected(ranges.error());
+        if (!ranges->empty()) {
+            plan.keys.resize(1);
+            plan.keys[0] = file.encryption->key;
+            plan.entries[0].key = key_id{0};
+            plan.entries[0].encrypted_ranges = std::move(*ranges);
+        }
+    }
     return plan;
 }
 

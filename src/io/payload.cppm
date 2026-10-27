@@ -22,12 +22,12 @@ export module nuxe.io.payload;
 import nuxe.error;
 import nuxe.extract.plan;
 
-namespace {
+namespace nuxe::detail {
 fn file_error(nuxe::io_operation operation, const std::filesystem::path &path,
               int code) -> nuxe::io_error {
     return {operation, path, std::error_code{code, std::generic_category()}};
 }
-} // namespace
+} // namespace nuxe::detail
 
 export namespace nuxe {
 
@@ -71,10 +71,10 @@ class payload_file {
         } while (status < 0 && errno == EINTR);
         if (status < 0)
             return std::unexpected(
-                file_error(io_operation::stat, *path_, errno));
+                detail::file_error(io_operation::stat, *path_, errno));
         if (!S_ISREG(info_.st_mode) || info_.st_size < 0)
             return std::unexpected(
-                file_error(io_operation::stat, *path_, EINVAL));
+                detail::file_error(io_operation::stat, *path_, EINVAL));
         return {};
     }
 
@@ -82,11 +82,11 @@ class payload_file {
     fn finish() -> result<void> {
         if (descriptor_ < 0)
             return std::unexpected(
-                file_error(io_operation::close, *path_, EBADF));
+                detail::file_error(io_operation::close, *path_, EBADF));
         const let descriptor = std::exchange(descriptor_, -1);
         if (::close(descriptor) < 0)
             return std::unexpected(
-                file_error(io_operation::close, *path_, errno));
+                detail::file_error(io_operation::close, *path_, errno));
         remove_on_failure_ = false;
         return {};
     }
@@ -113,7 +113,8 @@ fn open_archive(const std::filesystem::path &path) -> result<payload_file> {
         descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
     } while (descriptor < 0 && errno == EINTR);
     if (descriptor < 0)
-        return std::unexpected(file_error(io_operation::open, path, errno));
+        return std::unexpected(
+            detail::file_error(io_operation::open, path, errno));
     let file = payload_file{descriptor, path};
     const let inspected = file.inspect();
     if (!inspected)
@@ -139,7 +140,8 @@ fn open_output(const payload_file &input, const std::filesystem::path &path,
         } while (descriptor < 0 && errno == EINTR);
     }
     if (descriptor < 0)
-        return std::unexpected(file_error(io_operation::open, path, errno));
+        return std::unexpected(
+            detail::file_error(io_operation::open, path, errno));
 
     let output = payload_file{descriptor, path, created};
     const let inspected = output.inspect();
@@ -155,7 +157,7 @@ fn open_output(const payload_file &input, const std::filesystem::path &path,
         } while (status < 0 && errno == EINTR);
         if (status < 0)
             return std::unexpected(
-                file_error(io_operation::truncate, path, errno));
+                detail::file_error(io_operation::truncate, path, errno));
     }
     return output;
 }
@@ -163,10 +165,15 @@ fn open_output(const payload_file &input, const std::filesystem::path &path,
 fn open_output(const payload_file &, std::filesystem::path &&, overwrite_policy)
     -> result<payload_file> = delete;
 
+struct unchanged_payload {
+    fn operator()(std::span<std::byte>) const->result<void> { return {}; }
+};
+
+template <class Transform = unchanged_payload>
 fn copy_payload(const payload_file &input, const payload_file &output,
                 std::uint64_t data_offset, std::uint64_t data_length,
-                std::span<std::byte> buffer, std::stop_token cancellation = {})
-    -> result<void> {
+                std::span<std::byte> buffer, std::stop_token cancellation = {},
+                Transform transform = {}) -> result<void> {
     if (buffer.empty())
         return std::unexpected(extraction_error::invalid_worker_buffer);
     if (data_offset > input.size() || data_length > input.size() - data_offset)
@@ -181,20 +188,29 @@ fn copy_payload(const payload_file &input, const payload_file &output,
             static_cast<std::uint64_t>(buffer.size()),
             static_cast<std::uint64_t>(std::numeric_limits<ssize_t>::max()),
         }));
-        const let received = ::pread(input.descriptor(), buffer.data(), count,
-                                     static_cast<off_t>(data_offset + copied));
-        if (received < 0) {
-            if (errno == EINTR)
-                continue;
-            return std::unexpected(
-                file_error(io_operation::read, input.path(), errno));
+        let available = std::size_t{};
+        while (available < count) {
+            if (cancellation.stop_requested())
+                return std::unexpected(operation_cancelled{});
+            const let received =
+                ::pread(input.descriptor(), buffer.data() + available,
+                        count - available,
+                        static_cast<off_t>(data_offset + copied + available));
+            if (received < 0) {
+                if (errno == EINTR)
+                    continue;
+                return std::unexpected(detail::file_error(io_operation::read,
+                                                          input.path(), errno));
+            }
+            if (received == 0)
+                return std::unexpected(
+                    detail::file_error(io_operation::read, input.path(), EIO));
+            available += static_cast<std::size_t>(received);
         }
-        if (received == 0)
-            return std::unexpected(
-                file_error(io_operation::read, input.path(), EIO));
-
+        const let transformed = transform(buffer.first(available));
+        if (!transformed)
+            return std::unexpected(transformed.error());
         let written = std::size_t{};
-        const let available = static_cast<std::size_t>(received);
         while (written < available) {
             if (cancellation.stop_requested())
                 return std::unexpected(operation_cancelled{});
@@ -204,15 +220,15 @@ fn copy_payload(const payload_file &input, const payload_file &output,
             if (sent < 0) {
                 if (errno == EINTR)
                     continue;
-                return std::unexpected(
-                    file_error(io_operation::write, output.path(), errno));
+                return std::unexpected(detail::file_error(
+                    io_operation::write, output.path(), errno));
             }
             if (sent == 0)
-                return std::unexpected(
-                    file_error(io_operation::write, output.path(), EIO));
+                return std::unexpected(detail::file_error(io_operation::write,
+                                                          output.path(), EIO));
             written += static_cast<std::size_t>(sent);
         }
-        copied += static_cast<std::uint64_t>(received);
+        copied += available;
     }
     return {};
 }

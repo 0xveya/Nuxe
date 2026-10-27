@@ -110,7 +110,7 @@ struct extract_command {
     fn attach(CLI::App &app, int &exit_code, const diagnostics &diagnostics)
         -> void {
         let *command = app.add_subcommand(
-            "extract", "extract one unencrypted DS2 payload");
+            "extract", "extract and decrypt one DS2 payload");
         command
             ->add_option("header", header_path,
                          "encrypted or decrypted BHD5 header")

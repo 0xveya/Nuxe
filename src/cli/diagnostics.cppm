@@ -1,7 +1,6 @@
 module;
 
 #include <array>
-#include <cstdio>
 #include <format>
 #include <openssl/err.h>
 #include <print>
@@ -58,6 +57,10 @@ struct diagnostics {
                     report("encrypted payload extraction is not implemented",
                            {}, argument);
                     break;
+                case nuxe::extraction_error::invalid_encryption_range:
+                    report("invalid or overlapping AES payload ranges", {},
+                           argument);
+                    break;
                 case nuxe::extraction_error::invalid_source_range:
                     report("payload range is outside the data archive", {},
                            argument);
@@ -66,8 +69,9 @@ struct diagnostics {
                     report("invalid payload destination", {}, argument);
                     break;
                 case nuxe::extraction_error::invalid_worker_buffer:
-                    report("worker buffer must have a valid nonzero size", {},
-                           argument);
+                    report("worker buffer must be nonzero and at least 16 "
+                           "bytes for encrypted payloads",
+                           {}, argument);
                     break;
                 case nuxe::extraction_error::invalid_group:
                     report("invalid extraction group", {}, argument);
@@ -82,8 +86,14 @@ struct diagnostics {
                        argument);
             },
             case_(nuxe::crypto_error, error) {
-                let help =
-                    std::string{"use the matching DS2 RSA public key PEM"};
+                const let aes =
+                    error.operation ==
+                        nuxe::crypto_operation::prepare_file_cipher ||
+                    error.operation ==
+                        nuxe::crypto_operation::decrypt_file_ranges;
+                let help = std::string{
+                    aes ? "check the payload AES key and block ranges"
+                        : "use the matching DS2 RSA public key PEM"};
                 if (error.code != 0) {
                     let detail = std::array<char, 256>{};
                     ERR_error_string_n(error.code, detail.data(),

@@ -62,6 +62,7 @@ struct invalid_header {
 
 enum class extraction_error {
     encrypted_payload,
+    invalid_encryption_range,
     invalid_source_range,
     invalid_destination,
     invalid_worker_buffer,
