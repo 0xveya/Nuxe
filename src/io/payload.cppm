@@ -233,4 +233,43 @@ fn copy_payload(const payload_file &input, const payload_file &output,
     return {};
 }
 
+fn copy_plain_payload(const payload_file &input, const payload_file &output,
+                      std::uint64_t data_offset, std::uint64_t data_length,
+                      std::span<std::byte> buffer,
+                      std::stop_token cancellation = {}) -> result<void> {
+    if (buffer.empty())
+        return std::unexpected(extraction_error::invalid_worker_buffer);
+    if (data_offset > input.size() || data_length > input.size() - data_offset)
+        return std::unexpected(extraction_error::invalid_source_range);
+
+    constexpr std::uint64_t max_batch = 16 * 1024 * 1024;
+    let copied = std::uint64_t{};
+    while (copied < data_length) {
+        if (cancellation.stop_requested())
+            return std::unexpected(operation_cancelled{});
+        const let count =
+            static_cast<std::size_t>(std::min(data_length - copied, max_batch));
+        let source = static_cast<off_t>(data_offset + copied);
+        const let received =
+            ::copy_file_range(input.descriptor(), &source, output.descriptor(),
+                              nullptr, count, 0);
+        if (received < 0) {
+            const let code = errno;
+            if (code == EINTR)
+                continue;
+            if (code == EXDEV || code == ENOSYS || code == EOPNOTSUPP ||
+                code == EINVAL)
+                return copy_payload(input, output, data_offset + copied,
+                                    data_length - copied, buffer, cancellation);
+            return std::unexpected(
+                detail::file_error(io_operation::copy, output.path(), code));
+        }
+        if (received == 0)
+            return copy_payload(input, output, data_offset + copied,
+                                data_length - copied, buffer, cancellation);
+        copied += static_cast<std::uint64_t>(received);
+    }
+    return {};
+}
+
 } // namespace nuxe

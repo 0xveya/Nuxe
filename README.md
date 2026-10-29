@@ -1,153 +1,73 @@
 # nuxe
 
-C++23 Linux archive extractor in development. Uses native modules, Clang and Xmake,
-matching the local C++ projects. Xmake must be available on PATH.
+A Linux-focused fork of [JKAnderson/Nuxe](https://github.com/JKAnderson/Nuxe),
+rewritten in C++23 with native modules and Xmake. Mostly a side project because
+I'm bored and want to make archive I/O fast.
+
+Currently supports Dark Souls II, including Scholar of the First Sin: inspecting
+BHD5 headers, extracting individual files, and unpacking BHD/BDT archive pairs.
+Extracted files use bucket/file indices rather than original filenames. Other
+games, filename dictionaries, and executable patching aren't implemented yet.
+
+## Build
+
+Requires Linux, [mise](https://mise.jdx.dev/), and [Xmake](https://xmake.io/).
+Xmake resolves the C++ dependencies.
 
 ```nu
 mise trust
-mise run dev
+mise install
 mise run build
-mise run compiledb
-mise run format
 ```
 
-CLI11 2.7.2 is supplied by xrepo as a header-only dependency. `nuxe --help`
-prints usage; unknown arguments produce a diagnostic and nonzero exit code.
-Command adapters live in `src/cli`; `src/main.cpp` registers them and handles
-process-level failures. `include/nuxe/macros.h` and `nuxe.match` follow the local
-shitnet conventions.
+Use `mise run dev` for a debug build, `mise run format` for formatting, and
+`mise run compiledb` to regenerate clangd's compilation database.
 
-All command errors use the shared `nuxe.cli.diagnostics` module and print plain
-`nuxe: error: ...` messages to stderr, including the relevant path and cause.
-CLI11 handles argument parsing. Help and JSON go to stdout.
+## Usage
 
-Inspect a decrypted DS2 header:
+Examples use Nushell. Set `game` to your installed game's directory:
 
 ```nu
-mise exec -- xmake run nuxe inspect reference/output/LqMapEbl.decrypted.bhd
-```
-
-The BHD5 header, archive, and metadata readers live in separate native modules in
-`src/format`. The binary reader consumes memory spans and performs no file I/O.
-
-Inspect an encrypted DS2 header with its matching public key:
-
-```nu
-let game = "/mnt/data/SteamLibrary/steamapps/common/Dark Souls II Scholar of the First Sin/Game"
-^build/linux/x86_64/release/nuxe inspect ($game | path join "LqMapEbl.bhd") --key ($game | path join "LqMapKeyCode.pem") --jobs 4
-```
-
-`inspect` recognizes decrypted input by its `BHD5` signature. Encrypted input
-requires `--key`. `--jobs` is a positive maximum worker count and defaults to 1;
-small headers use fewer workers. JSON goes to stdout and failures go to stderr
-with a nonzero exit status. The command reads inputs without changing them.
-The current format support is DS2, including Scholar of the First Sin.
-
-Compare with the local Coremats reference after `mise run build`:
-
-```nu
-let game = "/mnt/data/SteamLibrary/steamapps/common/Dark Souls II Scholar of the First Sin/Game"
-let out = (mktemp -d | str trim)
+let game = "/path/to/Dark Souls II Scholar of the First Sin/Game"
 let header = ($game | path join "LqMapEbl.bhd")
+let data = ($game | path join "LqMapEbl.bdt")
 let key = ($game | path join "LqMapKeyCode.pem")
-^build/linux/x86_64/release/nuxe inspect $header --key $key --jobs 4 | save ($out | path join "nuxe.json")
-dotnet run --project reference -- $header DarkSouls2 ($out | path join "coremats") $key
-let comparable = 'del(.buckets[].files[].hash_offset, .buckets[].files[].encryption_offset, .buckets[].files[].unpadded_data_length)'
-jq -S $comparable ($out | path join "nuxe.json") | save ($out | path join "nuxe.sorted.json")
-jq -S $comparable ($out | path join "coremats/LqMapEbl.json") | save ($out | path join "coremats.sorted.json")
-diff -u ($out | path join "coremats.sorted.json") ($out | path join "nuxe.sorted.json")
+let out = ($env.HOME | path join "ds2-unpacked/LqMap")
+
+^build/linux/x86_64/release/nuxe inspect $header --key $key
+^build/linux/x86_64/release/nuxe extract $header $data --key $key --bucket 0 --file 0 --output ./payload.bin
+^build/linux/x86_64/release/nuxe unpack $header $data --key $key --output $out
 ```
 
-`diff` prints nothing when the metadata matches. Normalization removes Nuxe's
-metadata-record offsets, which Coremats does not emit, and Coremats' unpadded
-length field, which is zero for these DS2 records. Bucket/file order and all
-shared metadata remain part of the comparison. The ignored `reference` project requires .NET 10.
+Decrypted headers don't need `--key`. Unpacking writes
+`<output>/<bucket>/<file>.bin`; use a separate output directory for each archive.
+Inputs are read only, and existing outputs fail unless you pass `--replace`.
+A failed replacement can leave a partial file.
 
-RSA header decryption uses OpenSSL 3, private worker state, and atomic batch
-dispatch into a final-sized plaintext buffer. File reads live in `src/io/file.cppm`.
-Single-file and multi-file planning and buffered extraction are available as library
-APIs in `src/extract`; payload I/O ownership lives in `src/io/payload.cppm`.
-`prepare_worker` allocates the entire buffer before copying. `run_group` reuses
-that buffer without growing containers; output parent directories must already
-exist. Paths in the immutable plan must remain alive until I/O owners are closed.
-Newly created partial outputs are removed on failure on a best-effort basis.
-With replacement enabled, an existing output can be left partial after failure.
-Completion checks close errors but does not promise an fsync to storage.
+Unpacking uses all available hardware threads at background CPU and I/O priority.
+Set `--jobs` to limit workers, or `--eat-all-cpu` to keep normal inherited
+priority. Each worker uses a fixed buffer, configurable with `--buffer-size`.
+Plain files try `copy_file_range()` with buffered fallback; encrypted files use
+the buffered AES path. Completion does not imply an fsync to storage.
 
-Extract one payload using zero-based indices from `inspect`:
+Run `nuxe <command> --help` for all options.
+
+## Profiling
+
+The project pins Samply through mise. With the system `perf` tool installed:
 
 ```nu
-let game = "/mnt/data/SteamLibrary/steamapps/common/Dark Souls II Scholar of the First Sin/Game"
-let out = ((mktemp -d | str trim) | path join "payload.bin")
-^build/linux/x86_64/release/nuxe extract ($game | path join "LqMapEbl.bhd") ($game | path join "LqMapEbl.bdt") --key ($game | path join "LqMapKeyCode.pem") --bucket 0 --file 0 --output $out --buffer-size 4096
-ls $out
+let profile_out = ($env.HOME | path join $"nuxe-profile-(random uuid)")
+mise run profile -- unpack $header $data --key $key --output $profile_out
 ```
 
-`--output` names one file, and the command creates missing parent directories.
-Existing outputs fail unless `--replace` is supplied. `--buffer-size` is a positive
-byte count, defaults to 1 MiB, and is allocated before copying. `--jobs` only
-controls RSA header decryption; payload copying currently uses one worker.
-Encrypted payload ranges use AES-128-ECB without padding. Buffers must be at least
-16 bytes for entries with active encryption ranges.
-Decrypted headers work without `--key`. Run `nuxe extract --help` for the options.
+This builds optimized code with debug symbols and frame pointers, records CPU
+stacks, and opens Firefox Profiler in your browser. Leave the terminal running;
+Ctrl-C stops the local server. `mise run profile` reopens the latest recording.
+Profiles stay local under ignored `.cache/profiles/` unless you upload them.
+Unpacked output files remain in the directory you chose.
 
-Unpack an entire DS2 BHD5/BDT pair:
+Samples show CPU activity rather than exact function wall times. Compare real
+disk workloads separately from warm-cache or RAM-backed runs.
 
-```nu
-let game = "/mnt/data/SteamLibrary/steamapps/common/Dark Souls II Scholar of the First Sin/Game"
-let out = ((mktemp -d | str trim) | path join "LqMap")
-timeit {
-    ^build/linux/x86_64/release/nuxe unpack ($game | path join "LqMapEbl.bhd") ($game | path join "LqMapEbl.bdt") --key ($game | path join "LqMapKeyCode.pem") --output $out
-}
-ls $out
-```
-
-Outputs use `<output>/<bucket>/<file>.bin` with zero-based indices from `inspect`.
-Dictionary filenames are not resolved yet. Use a separate output directory for
-each archive. By default, unpacking uses all available hardware threads with CPU
-nice level 10 and idle I/O priority. Existing lower CPU priority is preserved.
-`--jobs 1` selects
-one worker; `--jobs 4` selects up to four. `--eat-all-cpu` keeps inherited CPU and
-I/O priority instead of lowering it. It does not change the worker count.
-Header and extraction stages run in sequence and use the same worker limit. Each
-worker gets a fixed `--buffer-size` allocation,
-which defaults to 1 MiB. Planning sorts entries by data offset and groups whole
-files with limits of 64 files and 64 MiB; oversized files get their own group.
-Existing outputs fail unless `--replace` is supplied. On failure, completed files
-remain, newly created incomplete files are removed, and replaced files may remain
-partial. The final summary is printed only on success. Timing includes header
-work and OS-accepted writes, without an fsync guarantee.
-
-Config, binder lookup, mapped I/O, and patch modules remain scaffolds.
-
-Profile in the browser with one mise task:
-
-```nu
-let game = "/mnt/data/SteamLibrary/steamapps/common/Dark Souls II Scholar of the First Sin/Game"
-let out = ($env.HOME | path join $"nuxe-profile-(random uuid)")
-mise run profile -- unpack ($game | path join "LqMapEbl.bhd") ($game | path join "LqMapEbl.bdt") --key ($game | path join "LqMapKeyCode.pem") --output $out --jobs 4
-```
-
-The task builds an optimized binary with debug symbols and frame pointers,
-records userspace CPU stacks with the system `perf`, and opens Samply's Firefox
-Profiler view in your default browser. Samply is pinned in the project's mise
-tools. Use the browser's flame graph, call tree, thread timeline, and source view
-to inspect CPU work. Blocked I/O time and kernel execution are excluded.
-
-Leave the terminal running while inspecting the profile; Ctrl-C stops the local
-symbol server. `mise run profile` with no arguments reopens the latest recording.
-Profiles and commands are kept under ignored `.cache/profiles/`. Data stays local
-unless you choose to upload it through the profiler UI.
-
-The `releasedbg` binary lives at `build/linux/x86_64/releasedbg/nuxe`; normal
-release artifacts remain separate. `mise run build` restores release configuration,
-and compilation commands for modules update with the selected mode. Tasks never
-change system permissions or invoke privilege escalation.
-
-For CPU-focused investigation, use warm input and a small RAM-backed output when
-appropriate. This reduces storage waits but still includes copying and memory
-bandwidth. Compare real disk workloads separately; profiler timings are not a
-replacement for uninstrumented Release benchmarks.
-
-The original [JKAnderson/Nuxe](https://github.com/JKAnderson/Nuxe) checkout is in
-`old_code/`, which is ignored by Git. It remains available in the fork's history.
+The original C# source is kept in ignored `old_code/` for reference.

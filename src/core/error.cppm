@@ -12,7 +12,17 @@ export module nuxe.error;
 
 export namespace nuxe {
 
-enum class io_operation { open, stat, read, map, seek, write, truncate, close };
+enum class io_operation {
+    open,
+    stat,
+    read,
+    map,
+    seek,
+    write,
+    copy,
+    truncate,
+    close
+};
 
 enum class crypto_operation {
     import_header_key,

@@ -117,6 +117,8 @@ struct diagnostics {
                         return "could not seek file";
                     case nuxe::io_operation::write:
                         return "could not write file";
+                    case nuxe::io_operation::copy:
+                        return "could not copy file";
                     case nuxe::io_operation::truncate:
                         return "could not truncate file";
                     case nuxe::io_operation::close:
