@@ -14,6 +14,7 @@ import nuxe.format.bhd5.metadata;
 export namespace nuxe {
 
 enum class overwrite_policy { fail, replace };
+enum class copy_mode { automatic, buffered };
 
 struct key_id {
     std::size_t value;

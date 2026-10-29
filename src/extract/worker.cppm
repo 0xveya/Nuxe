@@ -30,9 +30,11 @@ struct extraction_worker {
     std::vector<std::byte> buffer;
     worker_progress progress;
     std::vector<file_cipher> ciphers;
+    copy_mode copying = copy_mode::automatic;
 };
 
-fn prepare_worker(const extraction_plan &plan, std::size_t buffer_bytes)
+fn prepare_worker(const extraction_plan &plan, std::size_t buffer_bytes,
+                  copy_mode copying = copy_mode::automatic)
     -> result<extraction_worker> {
     if (buffer_bytes == 0 || buffer_bytes > std::vector<std::byte>{}.max_size())
         return std::unexpected(extraction_error::invalid_worker_buffer);
@@ -47,6 +49,7 @@ fn prepare_worker(const extraction_plan &plan, std::size_t buffer_bytes)
         .buffer = std::vector<std::byte>(buffer_bytes),
         .progress = {},
         .ciphers = {},
+        .copying = copying,
     };
     worker.ciphers.reserve(plan.keys.size());
     for (const let &key : plan.keys) {
@@ -93,7 +96,8 @@ fn run_group(const extraction_plan &plan, const extraction_group &group,
         let output = open_output(*input, entry.output_path, overwrite);
         if (!output)
             return std::unexpected(output.error());
-        if (entry.encrypted_ranges.empty()) {
+        if (entry.encrypted_ranges.empty() &&
+            worker.copying == copy_mode::automatic) {
             const let copied = copy_plain_payload(
                 *input, *output, entry.data_offset, entry.data_length,
                 worker.buffer, cancellation);
