@@ -40,7 +40,7 @@ struct unpack_command {
     std::string data_override;
     std::string output_root;
     std::string key_override;
-    std::string copying = "auto";
+    std::string copying = "buffered";
     std::size_t jobs = 0;
     std::size_t buffer_size = 1024 * 1024;
     bool replace = false;
@@ -252,8 +252,8 @@ struct unpack_command {
             ->check(size_option());
         command
             ->add_option("--copy-mode", copying,
-                         "plain-file copying: auto tries kernel copy "
-                         "(default), buffered forces the baseline")
+                         "plain-file copying: buffered (default), auto tries "
+                         "kernel copy with fallback")
             ->check(CLI::IsMember({"auto", "buffered"}));
         command->add_flag(
             "--replace", replace,
