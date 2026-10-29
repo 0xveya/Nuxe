@@ -3,7 +3,7 @@ set_version("0.1.0")
 set_languages("c++23")
 set_toolchains("clang")
 
-add_rules("mode.debug", "mode.release")
+add_rules("mode.debug", "mode.release", "mode.releasedbg")
 add_rules("plugin.compile_commands.autoupdate", { outputdir = ".", lsp = "clangd" })
 
 add_requires("cli11 2.7.2", { system = false, configs = { cmake = false } })
@@ -37,6 +37,10 @@ add_cxxflags("-Wpedantic", "-Wconversion", "-Wshadow", { tools = { "gcc", "clang
 
 target("nuxe")
     set_kind("binary")
+    if is_mode("releasedbg") then
+        set_strip("none")
+        add_cxxflags("-fno-omit-frame-pointer", { tools = { "gcc", "clang" } })
+    end
     set_rundir(os.projectdir())
     add_packages("cli11", "nlohmann_json_modules", "openssl3")
     add_syslinks("pthread")

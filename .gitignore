@@ -3,5 +3,9 @@
 /build/
 /.xmake/
 /.cache/
+/perf.data
+/perf.data.old
+/profile.json
+/profile.json.gz
 /compile_commands.json
 /.build/compile_commands.json

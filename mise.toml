@@ -1,6 +1,7 @@
 [tools]
 clang = "22.1.5"
 clang-format = "22.1.5"
+"github:mstange/samply" = "samply-v0.13.1"
 
 [tasks.build]
 description = "build nuxe in release mode"
@@ -25,3 +26,7 @@ run = "find include src -type f \\( -name '*.h' -o -name '*.cpp' -o -name '*.cpp
 [tasks.clean]
 description = "remove generated build files"
 run = "xmake clean -a"
+
+[tasks.profile]
+description = "record optimized CPU stacks and open the browser profiler; no args reopens the latest recording"
+run = "bash scripts/profile.sh"

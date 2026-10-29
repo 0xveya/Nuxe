@@ -120,5 +120,34 @@ work and OS-accepted writes, without an fsync guarantee.
 
 Config, binder lookup, mapped I/O, and patch modules remain scaffolds.
 
+Profile in the browser with one mise task:
+
+```nu
+let game = "/mnt/data/SteamLibrary/steamapps/common/Dark Souls II Scholar of the First Sin/Game"
+let out = ($env.HOME | path join $"nuxe-profile-(random uuid)")
+mise run profile -- unpack ($game | path join "LqMapEbl.bhd") ($game | path join "LqMapEbl.bdt") --key ($game | path join "LqMapKeyCode.pem") --output $out --jobs 4
+```
+
+The task builds an optimized binary with debug symbols and frame pointers,
+records userspace CPU stacks with the system `perf`, and opens Samply's Firefox
+Profiler view in your default browser. Samply is pinned in the project's mise
+tools. Use the browser's flame graph, call tree, thread timeline, and source view
+to inspect CPU work. Blocked I/O time and kernel execution are excluded.
+
+Leave the terminal running while inspecting the profile; Ctrl-C stops the local
+symbol server. `mise run profile` with no arguments reopens the latest recording.
+Profiles and commands are kept under ignored `.cache/profiles/`. Data stays local
+unless you choose to upload it through the profiler UI.
+
+The `releasedbg` binary lives at `build/linux/x86_64/releasedbg/nuxe`; normal
+release artifacts remain separate. `mise run build` restores release configuration,
+and compilation commands for modules update with the selected mode. Tasks never
+change system permissions or invoke privilege escalation.
+
+For CPU-focused investigation, use warm input and a small RAM-backed output when
+appropriate. This reduces storage waits but still includes copying and memory
+bandwidth. Compare real disk workloads separately; profiler timings are not a
+replacement for uninstrumented Release benchmarks.
+
 The original [JKAnderson/Nuxe](https://github.com/JKAnderson/Nuxe) checkout is in
 `old_code/`, which is ignored by Git. It remains available in the fork's history.
