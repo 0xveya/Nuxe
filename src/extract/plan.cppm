@@ -34,6 +34,11 @@ struct extraction_group {
     std::uint64_t byte_count;
 };
 
+struct group_limits {
+    std::size_t max_files;
+    std::uint64_t max_bytes;
+};
+
 // keep the plan unchanged while workers hold spans
 struct extraction_plan {
     std::filesystem::path data_path;

@@ -65,7 +65,7 @@ shared metadata remain part of the comparison. The ignored `reference` project r
 
 RSA header decryption uses OpenSSL 3, private worker state, and atomic batch
 dispatch into a final-sized plaintext buffer. File reads live in `src/io/file.cppm`.
-Single-file unencrypted planning and buffered copying are available as library
+Single-file and multi-file planning and buffered extraction are available as library
 APIs in `src/extract`; payload I/O ownership lives in `src/io/payload.cppm`.
 `prepare_worker` allocates the entire buffer before copying. `run_group` reuses
 that buffer without growing containers; output parent directories must already
@@ -74,7 +74,7 @@ Newly created partial outputs are removed on failure on a best-effort basis.
 With replacement enabled, an existing output can be left partial after failure.
 Completion checks close errors but does not promise an fsync to storage.
 
-Extract one unencrypted payload using zero-based indices from `inspect`:
+Extract one payload using zero-based indices from `inspect`:
 
 ```nu
 let game = "/mnt/data/SteamLibrary/steamapps/common/Dark Souls II Scholar of the First Sin/Game"
@@ -87,11 +87,38 @@ ls $out
 Existing outputs fail unless `--replace` is supplied. `--buffer-size` is a positive
 byte count, defaults to 1 MiB, and is allocated before copying. `--jobs` only
 controls RSA header decryption; payload copying currently uses one worker.
-Encrypted payload entries are rejected before creating output directories.
+Encrypted payload ranges use AES-128-ECB without padding. Buffers must be at least
+16 bytes for entries with active encryption ranges.
 Decrypted headers work without `--key`. Run `nuxe extract --help` for the options.
 
-AES payload decryption and the parallel extraction executor remain stubs; config, binder lookup, mapped I/O, and patch
-modules remain scaffolds.
+Unpack an entire DS2 BHD5/BDT pair:
+
+```nu
+let game = "/mnt/data/SteamLibrary/steamapps/common/Dark Souls II Scholar of the First Sin/Game"
+let out = ((mktemp -d | str trim) | path join "LqMap")
+timeit {
+    ^build/linux/x86_64/release/nuxe unpack ($game | path join "LqMapEbl.bhd") ($game | path join "LqMapEbl.bdt") --key ($game | path join "LqMapKeyCode.pem") --output $out
+}
+ls $out
+```
+
+Outputs use `<output>/<bucket>/<file>.bin` with zero-based indices from `inspect`.
+Dictionary filenames are not resolved yet. Use a separate output directory for
+each archive. By default, unpacking uses all available hardware threads with CPU
+nice level 10 and idle I/O priority. Existing lower CPU priority is preserved.
+`--jobs 1` selects
+one worker; `--jobs 4` selects up to four. `--eat-all-cpu` keeps inherited CPU and
+I/O priority instead of lowering it. It does not change the worker count.
+Header and extraction stages run in sequence and use the same worker limit. Each
+worker gets a fixed `--buffer-size` allocation,
+which defaults to 1 MiB. Planning sorts entries by data offset and groups whole
+files with limits of 64 files and 64 MiB; oversized files get their own group.
+Existing outputs fail unless `--replace` is supplied. On failure, completed files
+remain, newly created incomplete files are removed, and replaced files may remain
+partial. The final summary is printed only on success. Timing includes header
+work and OS-accepted writes, without an fsync guarantee.
+
+Config, binder lookup, mapped I/O, and patch modules remain scaffolds.
 
 The original [JKAnderson/Nuxe](https://github.com/JKAnderson/Nuxe) checkout is in
 `old_code/`, which is ignored by Git. It remains available in the fork's history.

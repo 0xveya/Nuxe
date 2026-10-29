@@ -5,6 +5,7 @@
 import nuxe.cli.diagnostics;
 import nuxe.cli.inspect;
 import nuxe.cli.extract;
+import nuxe.cli.unpack;
 
 fn main(int argc, char **argv) -> int {
     const let diagnostics = nuxe::cli::diagnostics{};
@@ -16,6 +17,8 @@ fn main(int argc, char **argv) -> int {
         inspect.attach(app, exit_code, diagnostics);
         let extract = nuxe::cli::extract_command{};
         extract.attach(app, exit_code, diagnostics);
+        let unpack = nuxe::cli::unpack_command{};
+        unpack.attach(app, exit_code, diagnostics);
         try {
             app.parse(argc, argv);
             return exit_code;
