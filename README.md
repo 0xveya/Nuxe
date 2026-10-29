@@ -5,27 +5,35 @@ Mostly a side project because I'm bored and want to make archive I/O fast.
 
 ## Current support
 
-**DS2 only for now.** Support is listed here so you don't have to dig through
-commits to find out what works.
+**DS2 only for now.** The table compares the original Nuxe's supported games
+with this C++ fork. Original platform labels describe archive formats, not the
+platforms this fork runs on.
 
-| Game | Status |
-| --- | --- |
-| Dark Souls II | Supported |
-| Dark Souls II: Scholar of the First Sin | Supported and tested against the original unpacker |
-| Other FromSoftware games | Not implemented |
+| Game / archive version | Original Nuxe unpacking | Inspect JSON | Extract one file | Unpack game directory | Decrypt headers / payloads | Original filenames |
+| --- | --- | --- | --- | --- | --- | --- |
+| Armored Core V (PS3, Xbox 360) | Yes | No | No | No | No | No |
+| Armored Core: Verdict Day (PS3, Xbox 360) | Yes | No | No | No | No | No |
+| Armored Core VI (PC) | Yes | No | No | No | No | No |
+| Dark Souls (PC, PS3, Xbox 360) | Yes | No | No | No | No | No |
+| Dark Souls Remastered (Switch) | Yes | No | No | No | No | No |
+| Dark Souls II (PC) | Yes | Yes* | Yes* | Yes* | Yes* | No |
+| Dark Souls II: Scholar of the First Sin (PC) | Yes | Yes | Yes | Yes | Yes | No |
+| Dark Souls III (PC) | Yes | No | No | No | No | No |
+| Elden Ring (PC) | Yes | No | No | No | No | No |
+| Elden Ring Nightreign (PC) | Yes | No | No | No | No | No |
+| Sekiro, including Digital Artwork & Mini Soundtrack (PC) | Yes | No | No | No | No | No |
+| Steel Battalion: Heavy Armor (Xbox 360) | Yes | No | No | No | No | No |
 
-| Feature | Status |
-| --- | --- |
-| Inspect BHD5 headers as JSON | Supported |
-| Extract individual payloads | Supported |
-| Unpack all archives in a game directory | Supported, with archive and key discovery |
-| RSA headers and AES payload decryption | Supported for DS2 |
-| Parallel extraction with bounded buffers | Supported |
-| Buffered copying | Default |
-| Linux kernel copying | Optional, with buffered fallback |
-| Original filenames / filename dictionaries | Not implemented; outputs use numbered paths |
-| Executable patching | Not implemented |
-| Browser CPU profiling | Available through mise; some C++ module names remain mangled |
+All feature columns after “Original Nuxe unpacking” describe this fork.
+“No” means not implemented. DS2 extraction supports RSA headers and AES payloads;
+outputs use numbered bucket/file paths. Scholar of the First Sin has been tested
+against the original unpacker. *The original DS2 uses the implemented DS2 path but
+hasn't been validated against a full game installation here.
+
+Extraction uses parallel workers with bounded buffers and buffered copying by
+default. Linux kernel copying is optional through `--copy-mode auto`, with
+buffered fallback. Executable patching isn't implemented. Browser CPU profiling
+is available through mise; some C++ module names remain mangled.
 
 **Linux only.** Windows support isn't planned right now. I don't have a Windows
 machine, and I don't know Windows I/O well enough to promise a proper port.
