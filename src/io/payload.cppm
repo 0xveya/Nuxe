@@ -151,6 +151,8 @@ fn open_output(const payload_file &input, const std::filesystem::path &path,
             detail::file_error(io_operation::open, path, errno));
 
     let output = payload_file{descriptor, path, created};
+    if (created)
+        return output;
     const let inspected = output.inspect();
     if (!inspected)
         return std::unexpected(inspected.error());
