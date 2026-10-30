@@ -95,7 +95,7 @@ struct unpack_command {
     std::string key_override;
     std::string copying = "buffered";
     std::size_t jobs = 0;
-    std::size_t buffer_size = 1024 * 1024;
+    std::size_t buffer_size = 64 * 1024;
     std::size_t group_files = 64;
     std::size_t group_bytes = 64 * 1024 * 1024;
     std::size_t cfr_min_size = 0;
@@ -376,7 +376,7 @@ struct unpack_command {
                           "background priority");
         command
             ->add_option("--buffer-size", buffer_size,
-                         "fixed buffer per worker in bytes (default: 1048576)")
+                         "fixed buffer per worker in bytes (default: 65536)")
             ->check(size_option());
         command
             ->add_option("--group-files", group_files,
