@@ -178,7 +178,8 @@ fn open_output(const payload_file &input, const std::filesystem::path &path,
     return output;
 }
 
-fn open_output(const payload_file &, std::filesystem::path &&, overwrite_policy)
+fn open_output(const payload_file &, std::filesystem::path &&, overwrite_policy,
+               std::span<const file_identity> = {})
     -> result<payload_file> = delete;
 
 struct copy_statistics {
