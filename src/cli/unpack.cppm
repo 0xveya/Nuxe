@@ -80,6 +80,7 @@ struct unpack_statistics {
     std::size_t archives{};
     std::size_t files{};
     std::size_t groups{};
+    std::size_t workers{};
     std::set<std::array<std::byte, 16>> keys;
     std::size_t ranges{};
     std::uint64_t plain_bytes{};
@@ -118,13 +119,14 @@ struct unpack_command {
                          statistics.preflight_seconds, statistics.setup_seconds,
                          statistics.directory_seconds,
                          statistics.payload_seconds, total);
-            std::println(
-                stderr,
-                "counts: archives={} files={} groups={} plain_bytes={} "
-                "encrypted_bytes={} unique_keys={} ranges={}",
-                statistics.archives, statistics.files, statistics.groups,
-                statistics.plain_bytes, statistics.encrypted_bytes,
-                statistics.keys.size(), statistics.ranges);
+            std::println(stderr,
+                         "counts: archives={} files={} groups={} workers={} "
+                         "plain_bytes={} "
+                         "encrypted_bytes={} unique_keys={} ranges={}",
+                         statistics.archives, statistics.files,
+                         statistics.groups, statistics.workers,
+                         statistics.plain_bytes, statistics.encrypted_bytes,
+                         statistics.keys.size(), statistics.ranges);
             const let &copying_stats = statistics.copying;
             std::println(stderr,
                          "copy: cfr_calls={} cfr_bytes={} cfr_fallbacks={} "
@@ -145,7 +147,8 @@ struct unpack_command {
                       unpack_statistics &statistics) const -> int {
         const let available = std::max(1U, std::thread::hardware_concurrency());
         const let worker_limit =
-            jobs == 0 ? static_cast<std::size_t>(available) : jobs;
+            jobs == 0 ? static_cast<std::size_t>(std::min(available, 2U))
+                      : jobs;
         if (!eat_all_cpu) {
             errno = 0;
             const let priority = ::getpriority(PRIO_PROCESS, 0);
@@ -270,6 +273,7 @@ struct unpack_command {
 
         record(statistics.preflight_seconds);
         const let worker_count = std::min(worker_limit, plan->groups.size());
+        statistics.workers = std::max(statistics.workers, worker_count);
         let workers = std::vector<nuxe::extraction_worker>{};
         workers.reserve(worker_count);
         for (std::size_t index = 0; index < worker_count; ++index) {
@@ -308,7 +312,8 @@ struct unpack_command {
                 statistics.copying.buffered_bytes +=
                     copying_stats.buffered_bytes;
                 statistics.copying.cfr_ns += copying_stats.cfr_ns;
-                for (const let &[ code, occurrences ] : copying_stats.cfr_errors)
+                for (const let &[ code, occurrences ] :
+                     copying_stats.cfr_errors)
                     statistics.copying.cfr_errors[code] += occurrences;
             }
         }
@@ -364,7 +369,7 @@ struct unpack_command {
         command
             ->add_option(
                 "--jobs", jobs,
-                "maximum workers (default: all available hardware threads)")
+                "maximum workers (default: up to 2 available hardware threads)")
             ->check(size_option());
         command->add_flag("--eat-all-cpu", eat_all_cpu,
                           "keep inherited CPU and I/O priority instead of "

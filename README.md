@@ -109,7 +109,7 @@ Useful `unpack` options:
 
 | Option | Behavior |
 | --- | --- |
-| `--jobs N` | Limit workers. Defaults to all available hardware threads. |
+| `--jobs N` | Limit workers. Defaults to at most 2 available hardware threads. |
 | `--buffer-size N` | Buffer bytes per worker. Defaults to 1048576 (1 MiB). |
 | `--replace` | Replace existing output files. |
 | `--eat-all-cpu` | Keep inherited CPU and I/O priority instead of lowering it. |
