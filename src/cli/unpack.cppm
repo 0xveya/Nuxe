@@ -12,11 +12,13 @@ module;
 #include <format>
 #include <functional>
 #include <linux/ioprio.h>
+#include <optional>
 #include <print>
 #include <set>
 #include <span>
 #include <string>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <system_error>
 #include <thread>
@@ -36,8 +38,37 @@ import nuxe.extract.plan;
 import nuxe.extract.planner;
 import nuxe.extract.worker;
 import nuxe.extract.executor;
+import nuxe.io.payload;
 
 export namespace nuxe::cli {
+
+fn protected_identities(std::span<const archive_paths> inputs,
+                        const diagnostics &diagnostics)
+    -> std::optional<std::vector<nuxe::file_identity>> {
+    let identities = std::vector<nuxe::file_identity>{};
+    for (const let &source : inputs) {
+        for (const let *path : {&source.header, &source.data, &source.key}) {
+            if (path->empty())
+                continue;
+            struct stat info{};
+            let status = int{};
+            do {
+                status = ::stat(path->c_str(), &info);
+            } while (status < 0 && errno == EINTR);
+            if (status < 0) {
+                if (errno == ENOENT)
+                    continue;
+                diagnostics.report(
+                    "could not inspect protected input",
+                    std::error_code{errno, std::generic_category()}.message(),
+                    path->string());
+                return std::nullopt;
+            }
+            identities.push_back({info.st_dev, info.st_ino});
+        }
+    }
+    return identities;
+}
 
 struct unpack_statistics {
     double header_seconds{};
@@ -137,11 +168,14 @@ struct unpack_command {
             const let archives = discover_archives(input_path, diagnostics);
             if (!archives)
                 return 1;
+            const let identities = protected_identities(*archives, diagnostics);
+            if (!identities)
+                return 1;
             for (const let &paths : *archives) {
                 const let destination =
                     std::filesystem::path{output_root} / paths.header.stem();
                 if (run_archive(paths, destination, worker_limit, diagnostics,
-                                *archives, statistics) != 0)
+                                *identities, statistics) != 0)
                     return 1;
             }
             return 0;
@@ -151,14 +185,18 @@ struct unpack_command {
             paths.data = data_override;
         if (!key_override.empty())
             paths.key = key_override;
+        const let identities =
+            protected_identities(std::span{&paths, 1}, diagnostics);
+        if (!identities)
+            return 1;
         return run_archive(paths, output_root, worker_limit, diagnostics,
-                           std::span{&paths, 1}, statistics);
+                           *identities, statistics);
     }
 
     fn run_archive(const archive_paths &paths,
                    const std::filesystem::path &destination,
                    std::size_t worker_limit, const diagnostics &diagnostics,
-                   std::span<const archive_paths> inputs,
+                   std::span<const nuxe::file_identity> inputs,
                    unpack_statistics &statistics) const -> int {
         let stage_started = std::chrono::steady_clock::now();
         const let record = [&](double &seconds) {
@@ -216,31 +254,6 @@ struct unpack_command {
         }
         record(statistics.planning_seconds);
 
-        for (const let &entry : plan->entries) {
-            for (const let &source : inputs) {
-                for (const let *input :
-                     {&source.header, &source.data, &source.key}) {
-                    if (input->empty())
-                        continue;
-                    const let same = std::filesystem::equivalent(
-                        *input, entry.output_path, error);
-                    if (same) {
-                        diagnostics.report(
-                            "output would overwrite an input file", {},
-                            entry.output_path.string());
-                        return 1;
-                    }
-                    if (error &&
-                        error != std::errc::no_such_file_or_directory) {
-                        diagnostics.report("could not check output destination",
-                                           error.message(),
-                                           entry.output_path.string());
-                        return 1;
-                    }
-                }
-            }
-        }
-
         record(statistics.preflight_seconds);
         const let worker_count = std::min(worker_limit, plan->groups.size());
         let workers = std::vector<nuxe::extraction_worker>{};
@@ -249,7 +262,8 @@ struct unpack_command {
             let worker = nuxe::prepare_worker(*plan, buffer_size,
                                               copying == "buffered"
                                                   ? nuxe::copy_mode::buffered
-                                                  : nuxe::copy_mode::automatic);
+                                                  : nuxe::copy_mode::automatic,
+                                              inputs);
             if (!worker) {
                 diagnostics.report(worker.error(), output_path);
                 return 1;

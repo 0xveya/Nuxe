@@ -124,9 +124,16 @@ fn open_archive(const std::filesystem::path &path) -> result<payload_file> {
 
 fn open_archive(std::filesystem::path &&) -> result<payload_file> = delete;
 
+struct file_identity {
+    dev_t device;
+    ino_t inode;
+};
+
 // parents are created before workers start
 fn open_output(const payload_file &input, const std::filesystem::path &path,
-               overwrite_policy overwrite) -> result<payload_file> {
+               overwrite_policy overwrite,
+               std::span<const file_identity> protected_inputs = {})
+    -> result<payload_file> {
     constexpr int flags = O_WRONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK;
     let descriptor = int{};
     do {
@@ -150,6 +157,11 @@ fn open_output(const payload_file &input, const std::filesystem::path &path,
     if (input.info().st_dev == output.info().st_dev &&
         input.info().st_ino == output.info().st_ino)
         return std::unexpected(extraction_error::invalid_destination);
+    for (const let &identity : protected_inputs) {
+        if (identity.device == output.info().st_dev &&
+            identity.inode == output.info().st_ino)
+            return std::unexpected(extraction_error::invalid_destination);
+    }
     if (!created) {
         let status = int{};
         do {
