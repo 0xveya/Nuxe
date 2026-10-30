@@ -3,6 +3,7 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <span>
 #include <stop_token>
 #include <utility>
@@ -29,7 +30,8 @@ struct worker_progress {
 struct extraction_worker {
     std::vector<std::byte> buffer;
     worker_progress progress;
-    std::vector<file_cipher> ciphers;
+    std::optional<file_cipher> cipher;
+    std::optional<key_id> active_key;
     copy_mode copying = copy_mode::buffered;
     std::span<const file_identity> protected_inputs;
 };
@@ -50,17 +52,11 @@ fn prepare_worker(const extraction_plan &plan, std::size_t buffer_bytes,
     let worker = extraction_worker{
         .buffer = std::vector<std::byte>(buffer_bytes),
         .progress = {},
-        .ciphers = {},
+        .cipher = {},
+        .active_key = {},
         .copying = copying,
         .protected_inputs = protected_inputs,
     };
-    worker.ciphers.reserve(plan.keys.size());
-    for (const let &key : plan.keys) {
-        let cipher = file_cipher::create(key);
-        if (!cipher)
-            return std::unexpected(cipher.error());
-        worker.ciphers.emplace_back(std::move(*cipher));
-    }
     return worker;
 }
 
@@ -75,7 +71,7 @@ fn run_group(const extraction_plan &plan, const extraction_group &group,
     const let entries =
         std::span{plan.entries}.subspan(group.first_entry, group.entry_count);
     for (const let &entry : entries) {
-        if (entry.key && entry.key->value >= worker.ciphers.size())
+        if (entry.key && entry.key->value >= plan.keys.size())
             return std::unexpected(extraction_error::invalid_group);
         if (!entry.encrypted_ranges.empty() &&
             (!entry.key || worker.buffer.size() < 16))
@@ -96,6 +92,22 @@ fn run_group(const extraction_plan &plan, const extraction_group &group,
     for (const let &entry : entries) {
         if (cancellation.stop_requested())
             return std::unexpected(operation_cancelled{});
+        if (!entry.encrypted_ranges.empty()) {
+            const let &key = plan.keys[entry.key->value];
+            if (!worker.cipher) {
+                let cipher = file_cipher::create(key);
+                if (!cipher)
+                    return std::unexpected(cipher.error());
+                worker.cipher.emplace(std::move(*cipher));
+                worker.active_key = entry.key;
+            } else if (!worker.active_key ||
+                       worker.active_key->value != entry.key->value) {
+                const let rekeyed = worker.cipher->rekey(key);
+                if (!rekeyed)
+                    return std::unexpected(rekeyed.error());
+                worker.active_key = entry.key;
+            }
+        }
         let output = open_output(*input, entry.output_path, overwrite,
                                  worker.protected_inputs);
         if (!output)
@@ -120,8 +132,7 @@ fn run_group(const extraction_plan &plan, const extraction_group &group,
                     std::span{worker.buffer}.first(chunk.size), cancellation,
                     [&](std::span<std::byte> bytes) -> result<void> {
                         if (chunk.encrypted)
-                            return worker.ciphers[entry.key->value]
-                                .decrypt_blocks(bytes);
+                            return worker.cipher->decrypt_blocks(bytes);
                         return {};
                     });
                 if (!copied)

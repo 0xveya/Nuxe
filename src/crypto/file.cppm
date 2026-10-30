@@ -30,6 +30,7 @@ class file_cipher {
     fn operator=(const file_cipher &)->file_cipher & = delete;
 
     fn decrypt_blocks(std::span<std::byte> blocks) -> result<void>;
+    fn rekey(std::span<const std::byte, 16> key) -> result<void>;
 
   private:
     struct state;
@@ -79,6 +80,27 @@ fn file_cipher::create(std::span<const std::byte, 16> key)
         return failure();
 
     return file_cipher{std::move(prepared)};
+}
+
+fn file_cipher::rekey(std::span<const std::byte, 16> key) -> result<void> {
+    ERR_clear_error();
+
+    const let failure = [] {
+        return std::unexpected(crypto_error{
+            crypto_operation::prepare_file_cipher,
+            ERR_get_error(),
+        });
+    };
+
+    if (!state_)
+        return failure();
+    if (EVP_DecryptInit_ex2(state_->context.get(), nullptr,
+                            reinterpret_cast<const unsigned char *>(key.data()),
+                            nullptr, nullptr) != 1)
+        return failure();
+    if (EVP_CIPHER_CTX_set_padding(state_->context.get(), 0) != 1)
+        return failure();
+    return {};
 }
 
 fn file_cipher::decrypt_blocks(std::span<std::byte> blocks) -> result<void> {
