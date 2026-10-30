@@ -30,6 +30,9 @@ struct worker_progress {
 struct extraction_worker {
     std::vector<std::byte> buffer;
     worker_progress progress;
+    copy_statistics statistics;
+    std::uint64_t cfr_min_size{};
+    bool collect_statistics = false;
     std::optional<payload_file> input;
     std::optional<file_cipher> cipher;
     std::optional<key_id> active_key;
@@ -39,7 +42,9 @@ struct extraction_worker {
 
 fn prepare_worker(const extraction_plan &plan, std::size_t buffer_bytes,
                   copy_mode copying = copy_mode::buffered,
-                  std::span<const file_identity> protected_inputs = {})
+                  std::span<const file_identity> protected_inputs = {},
+                  std::uint64_t cfr_min_size = 0,
+                  bool collect_statistics = false)
     -> result<extraction_worker> {
     if (buffer_bytes == 0 || buffer_bytes > std::vector<std::byte>{}.max_size())
         return std::unexpected(extraction_error::invalid_worker_buffer);
@@ -56,6 +61,9 @@ fn prepare_worker(const extraction_plan &plan, std::size_t buffer_bytes,
     let worker = extraction_worker{
         .buffer = std::vector<std::byte>(buffer_bytes),
         .progress = {},
+        .statistics = {},
+        .cfr_min_size = cfr_min_size,
+        .collect_statistics = collect_statistics,
         .input = std::move(*input),
         .cipher = {},
         .active_key = {},
@@ -89,6 +97,7 @@ fn run_group(const extraction_plan &plan, const extraction_group &group,
     if (!worker.input)
         return std::unexpected(extraction_error::invalid_group);
     const let &input = worker.input;
+    let *statistics = worker.collect_statistics ? &worker.statistics : nullptr;
     for (const let &entry : entries) {
         if (entry.data_offset > input->size() ||
             entry.data_length > input->size() - entry.data_offset)
@@ -118,10 +127,11 @@ fn run_group(const extraction_plan &plan, const extraction_group &group,
         if (!output)
             return std::unexpected(output.error());
         if (entry.encrypted_ranges.empty() &&
-            worker.copying == copy_mode::automatic) {
+            worker.copying == copy_mode::automatic &&
+            entry.data_length >= worker.cfr_min_size) {
             const let copied = copy_plain_payload(
                 *input, *output, entry.data_offset, entry.data_length,
-                worker.buffer, cancellation);
+                worker.buffer, cancellation, statistics);
             if (!copied)
                 return std::unexpected(copied.error());
         } else {
@@ -141,7 +151,8 @@ fn run_group(const extraction_plan &plan, const extraction_group &group,
                         if (chunk.encrypted)
                             return worker.cipher->decrypt_blocks(bytes);
                         return {};
-                    });
+                    },
+                    statistics);
                 if (!copied)
                     return std::unexpected(copied.error());
             }

@@ -84,6 +84,7 @@ struct unpack_statistics {
     std::size_t ranges{};
     std::uint64_t plain_bytes{};
     std::uint64_t encrypted_bytes{};
+    nuxe::copy_statistics copying;
 };
 
 struct unpack_command {
@@ -96,6 +97,7 @@ struct unpack_command {
     std::size_t buffer_size = 1024 * 1024;
     std::size_t group_files = 64;
     std::size_t group_bytes = 64 * 1024 * 1024;
+    std::size_t cfr_min_size = 0;
     bool replace = false;
     bool eat_all_cpu = false;
     bool stats = false;
@@ -123,6 +125,18 @@ struct unpack_command {
                 statistics.archives, statistics.files, statistics.groups,
                 statistics.plain_bytes, statistics.encrypted_bytes,
                 statistics.keys.size(), statistics.ranges);
+            const let &copying_stats = statistics.copying;
+            std::println(stderr,
+                         "copy: cfr_calls={} cfr_bytes={} cfr_fallbacks={} "
+                         "buffered_bytes={} cfr_ns={}",
+                         copying_stats.cfr_calls, copying_stats.cfr_bytes,
+                         copying_stats.cfr_fallbacks,
+                         copying_stats.buffered_bytes, copying_stats.cfr_ns);
+            for (const let &[ code, occurrences ] : copying_stats.cfr_errors)
+                std::println(
+                    stderr, "copy errno: code={} count={} message={}", code,
+                    occurrences,
+                    std::error_code{code, std::generic_category()}.message());
         }
         return status;
     }
@@ -263,7 +277,7 @@ struct unpack_command {
                                               copying == "buffered"
                                                   ? nuxe::copy_mode::buffered
                                                   : nuxe::copy_mode::automatic,
-                                              inputs);
+                                              inputs, cfr_min_size, stats);
             if (!worker) {
                 diagnostics.report(worker.error(), output_path);
                 return 1;
@@ -285,6 +299,19 @@ struct unpack_command {
                                    replace ? nuxe::overwrite_policy::replace
                                            : nuxe::overwrite_policy::fail);
         record(statistics.payload_seconds);
+        if (stats) {
+            for (const let &worker : workers) {
+                const let &copying_stats = worker.statistics;
+                statistics.copying.cfr_calls += copying_stats.cfr_calls;
+                statistics.copying.cfr_bytes += copying_stats.cfr_bytes;
+                statistics.copying.cfr_fallbacks += copying_stats.cfr_fallbacks;
+                statistics.copying.buffered_bytes +=
+                    copying_stats.buffered_bytes;
+                statistics.copying.cfr_ns += copying_stats.cfr_ns;
+                for (const let &[ code, occurrences ] : copying_stats.cfr_errors)
+                    statistics.copying.cfr_errors[code] += occurrences;
+            }
+        }
         if (!outcome) {
             diagnostics.report(outcome.error(), output_path);
             return 1;
@@ -355,6 +382,11 @@ struct unpack_command {
                 "--group-bytes", group_bytes,
                 "experimental maximum bytes per group (default: 67108864)")
             ->check(size_option());
+        command
+            ->add_option(
+                "--cfr-min-size", cfr_min_size,
+                "minimum plain-file bytes for auto kernel copying (default: 0)")
+            ->check(size_option(true));
         command->add_flag(
             "--stats", stats,
             "print extraction stage timings and counters to stderr");

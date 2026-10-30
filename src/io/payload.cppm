@@ -2,12 +2,14 @@ module;
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <fcntl.h>
 #include <filesystem>
 #include <limits>
+#include <map>
 #include <span>
 #include <stop_token>
 #include <sys/stat.h>
@@ -179,6 +181,15 @@ fn open_output(const payload_file &input, const std::filesystem::path &path,
 fn open_output(const payload_file &, std::filesystem::path &&, overwrite_policy)
     -> result<payload_file> = delete;
 
+struct copy_statistics {
+    std::uint64_t cfr_calls{};
+    std::uint64_t cfr_bytes{};
+    std::uint64_t cfr_fallbacks{};
+    std::uint64_t buffered_bytes{};
+    std::uint64_t cfr_ns{};
+    std::map<int, std::uint64_t> cfr_errors;
+};
+
 struct unchanged_payload {
     fn operator()(std::span<std::byte>) const->result<void> { return {}; }
 };
@@ -187,7 +198,8 @@ template <class Transform = unchanged_payload>
 fn copy_payload(const payload_file &input, const payload_file &output,
                 std::uint64_t data_offset, std::uint64_t data_length,
                 std::span<std::byte> buffer, std::stop_token cancellation = {},
-                Transform transform = {}) -> result<void> {
+                Transform transform = {}, copy_statistics *statistics = nullptr)
+    -> result<void> {
     if (buffer.empty())
         return std::unexpected(extraction_error::invalid_worker_buffer);
     if (data_offset > input.size() || data_length > input.size() - data_offset)
@@ -241,6 +253,8 @@ fn copy_payload(const payload_file &input, const payload_file &output,
                 return std::unexpected(detail::file_error(io_operation::write,
                                                           output.path(), EIO));
             written += static_cast<std::size_t>(sent);
+            if (statistics)
+                statistics->buffered_bytes += static_cast<std::uint64_t>(sent);
         }
         copied += available;
     }
@@ -250,7 +264,8 @@ fn copy_payload(const payload_file &input, const payload_file &output,
 fn copy_plain_payload(const payload_file &input, const payload_file &output,
                       std::uint64_t data_offset, std::uint64_t data_length,
                       std::span<std::byte> buffer,
-                      std::stop_token cancellation = {}) -> result<void> {
+                      std::stop_token cancellation = {},
+                      copy_statistics *statistics = nullptr) -> result<void> {
     if (buffer.empty())
         return std::unexpected(extraction_error::invalid_worker_buffer);
     if (data_offset > input.size() || data_length > input.size() - data_offset)
@@ -264,23 +279,45 @@ fn copy_plain_payload(const payload_file &input, const payload_file &output,
         const let count =
             static_cast<std::size_t>(std::min(data_length - copied, max_batch));
         let source = static_cast<off_t>(data_offset + copied);
+        const let started = statistics
+                                ? std::chrono::steady_clock::now()
+                                : std::chrono::steady_clock::time_point{};
         const let received =
             ::copy_file_range(input.descriptor(), &source, output.descriptor(),
                               nullptr, count, 0);
+        const let code = received < 0 ? errno : 0;
+        if (statistics) {
+            ++statistics->cfr_calls;
+            statistics->cfr_ns += static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - started)
+                    .count());
+            if (received > 0)
+                statistics->cfr_bytes += static_cast<std::uint64_t>(received);
+            if (code != 0)
+                ++statistics->cfr_errors[code];
+        }
         if (received < 0) {
-            const let code = errno;
             if (code == EINTR)
                 continue;
             if (code == EXDEV || code == ENOSYS || code == EOPNOTSUPP ||
-                code == EINVAL)
+                code == EINVAL) {
+                if (statistics)
+                    ++statistics->cfr_fallbacks;
                 return copy_payload(input, output, data_offset + copied,
-                                    data_length - copied, buffer, cancellation);
+                                    data_length - copied, buffer, cancellation,
+                                    unchanged_payload{}, statistics);
+            }
             return std::unexpected(
                 detail::file_error(io_operation::copy, output.path(), code));
         }
-        if (received == 0)
+        if (received == 0) {
+            if (statistics)
+                ++statistics->cfr_fallbacks;
             return copy_payload(input, output, data_offset + copied,
-                                data_length - copied, buffer, cancellation);
+                                data_length - copied, buffer, cancellation,
+                                unchanged_payload{}, statistics);
+        }
         copied += static_cast<std::uint64_t>(received);
     }
     return {};
