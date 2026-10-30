@@ -125,16 +125,18 @@ fn run_group(const extraction_plan &plan, const extraction_group &group,
             if (!copied)
                 return std::unexpected(copied.error());
         } else {
-            let offset = std::uint64_t{};
-            while (offset < entry.data_length) {
-                const let next =
-                    next_payload_chunk(entry, offset, worker.buffer.size());
+            let cursor = payload_cursor{entry};
+            while (true) {
+                const let next = cursor.next(worker.buffer.size());
                 if (!next)
                     return std::unexpected(next.error());
+                if (!*next)
+                    break;
                 const let chunk = **next;
                 const let copied = copy_payload(
-                    *input, *output, entry.data_offset + offset, chunk.size,
-                    std::span{worker.buffer}.first(chunk.size), cancellation,
+                    *input, *output, entry.data_offset + chunk.file_offset,
+                    chunk.size, std::span{worker.buffer}.first(chunk.size),
+                    cancellation,
                     [&](std::span<std::byte> bytes) -> result<void> {
                         if (chunk.encrypted)
                             return worker.cipher->decrypt_blocks(bytes);
@@ -142,7 +144,6 @@ fn run_group(const extraction_plan &plan, const extraction_group &group,
                     });
                 if (!copied)
                     return std::unexpected(copied.error());
-                offset += chunk.size;
             }
         }
         const let finished = output->finish();
