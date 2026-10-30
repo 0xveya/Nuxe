@@ -145,6 +145,16 @@ struct unpack_command {
 
     fn run_extraction(const diagnostics &diagnostics,
                       unpack_statistics &statistics) const -> int {
+        const let protect = [&](std::span<const archive_paths> inputs) {
+            const let started = std::chrono::steady_clock::now();
+            let identities = protected_identities(inputs, diagnostics);
+            if (stats)
+                statistics.preflight_seconds +=
+                    std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - started)
+                        .count();
+            return identities;
+        };
         const let available = std::max(1U, std::thread::hardware_concurrency());
         const let worker_limit =
             jobs == 0 ? static_cast<std::size_t>(std::min(available, 2U))
@@ -185,7 +195,7 @@ struct unpack_command {
             const let archives = discover_archives(input_path, diagnostics);
             if (!archives)
                 return 1;
-            const let identities = protected_identities(*archives, diagnostics);
+            const let identities = protect(*archives);
             if (!identities)
                 return 1;
             for (const let &paths : *archives) {
@@ -202,8 +212,7 @@ struct unpack_command {
             paths.data = data_override;
         if (!key_override.empty())
             paths.key = key_override;
-        const let identities =
-            protected_identities(std::span{&paths, 1}, diagnostics);
+        const let identities = protect(std::span{&paths, 1});
         if (!identities)
             return 1;
         return run_archive(paths, output_root, worker_limit, diagnostics,
@@ -271,7 +280,6 @@ struct unpack_command {
         }
         record(statistics.planning_seconds);
 
-        record(statistics.preflight_seconds);
         const let worker_count = std::min(worker_limit, plan->groups.size());
         statistics.workers = std::max(statistics.workers, worker_count);
         let workers = std::vector<nuxe::extraction_worker>{};
