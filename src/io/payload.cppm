@@ -265,11 +265,16 @@ fn copy_plain_payload(const payload_file &input, const payload_file &output,
                       std::uint64_t data_offset, std::uint64_t data_length,
                       std::span<std::byte> buffer,
                       std::stop_token cancellation = {},
-                      copy_statistics *statistics = nullptr) -> result<void> {
+                      copy_statistics *statistics = nullptr,
+                      bool *cfr_unavailable = nullptr) -> result<void> {
     if (buffer.empty())
         return std::unexpected(extraction_error::invalid_worker_buffer);
     if (data_offset > input.size() || data_length > input.size() - data_offset)
         return std::unexpected(extraction_error::invalid_source_range);
+
+    if (cfr_unavailable && *cfr_unavailable)
+        return copy_payload(input, output, data_offset, data_length, buffer,
+                            cancellation, unchanged_payload{}, statistics);
 
     constexpr std::uint64_t max_batch = 16 * 1024 * 1024;
     let copied = std::uint64_t{};
@@ -298,6 +303,8 @@ fn copy_plain_payload(const payload_file &input, const payload_file &output,
                 ++statistics->cfr_errors[code];
         }
         if (received < 0) {
+            if (code == ENOSYS && cfr_unavailable)
+                *cfr_unavailable = true;
             if (code == EINTR)
                 continue;
             if (code == EXDEV || code == ENOSYS || code == EOPNOTSUPP ||

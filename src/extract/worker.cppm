@@ -33,6 +33,7 @@ struct extraction_worker {
     copy_statistics statistics;
     std::uint64_t cfr_min_size{};
     bool collect_statistics = false;
+    bool cfr_unavailable = false;
     std::optional<payload_file> input;
     std::optional<file_cipher> cipher;
     std::optional<key_id> active_key;
@@ -64,6 +65,7 @@ fn prepare_worker(const extraction_plan &plan, std::size_t buffer_bytes,
         .statistics = {},
         .cfr_min_size = cfr_min_size,
         .collect_statistics = collect_statistics,
+        .cfr_unavailable = false,
         .input = std::move(*input),
         .cipher = {},
         .active_key = {},
@@ -131,7 +133,8 @@ fn run_group(const extraction_plan &plan, const extraction_group &group,
             entry.data_length >= worker.cfr_min_size) {
             const let copied = copy_plain_payload(
                 *input, *output, entry.data_offset, entry.data_length,
-                worker.buffer, cancellation, statistics);
+                worker.buffer, cancellation, statistics,
+                &worker.cfr_unavailable);
             if (!copied)
                 return std::unexpected(copied.error());
         } else {
