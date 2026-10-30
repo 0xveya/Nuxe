@@ -10,3 +10,6 @@
 /profile.json.gz
 /compile_commands.json
 /.build/compile_commands.json
+
+/docs/benchmarks/
+/docs/performance.md
