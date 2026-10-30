@@ -2,14 +2,18 @@ module;
 
 #include <CLI/CLI.hpp>
 #include <algorithm>
+#include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <format>
 #include <functional>
 #include <linux/ioprio.h>
 #include <print>
+#include <set>
 #include <span>
 #include <string>
 #include <sys/resource.h>
@@ -35,6 +39,22 @@ import nuxe.extract.executor;
 
 export namespace nuxe::cli {
 
+struct unpack_statistics {
+    double header_seconds{};
+    double planning_seconds{};
+    double preflight_seconds{};
+    double setup_seconds{};
+    double directory_seconds{};
+    double payload_seconds{};
+    std::size_t archives{};
+    std::size_t files{};
+    std::size_t groups{};
+    std::set<std::array<std::byte, 16>> keys;
+    std::size_t ranges{};
+    std::uint64_t plain_bytes{};
+    std::uint64_t encrypted_bytes{};
+};
+
 struct unpack_command {
     std::string input_path;
     std::string data_override;
@@ -43,10 +63,41 @@ struct unpack_command {
     std::string copying = "buffered";
     std::size_t jobs = 0;
     std::size_t buffer_size = 1024 * 1024;
+    std::size_t group_files = 64;
+    std::size_t group_bytes = 64 * 1024 * 1024;
     bool replace = false;
     bool eat_all_cpu = false;
+    bool stats = false;
 
     fn run(const diagnostics &diagnostics) const -> int {
+        const let started = std::chrono::steady_clock::now();
+        let statistics = unpack_statistics{};
+        const let status = run_extraction(diagnostics, statistics);
+        if (stats) {
+            const let total = std::chrono::duration<double>(
+                                  std::chrono::steady_clock::now() - started)
+                                  .count();
+            std::println(stderr,
+                         "stages (s): header={:.6f} planning={:.6f} "
+                         "preflight={:.6f} setup={:.6f} directories={:.6f} "
+                         "payload={:.6f} total={:.6f}",
+                         statistics.header_seconds, statistics.planning_seconds,
+                         statistics.preflight_seconds, statistics.setup_seconds,
+                         statistics.directory_seconds,
+                         statistics.payload_seconds, total);
+            std::println(
+                stderr,
+                "counts: archives={} files={} groups={} plain_bytes={} "
+                "encrypted_bytes={} unique_keys={} ranges={}",
+                statistics.archives, statistics.files, statistics.groups,
+                statistics.plain_bytes, statistics.encrypted_bytes,
+                statistics.keys.size(), statistics.ranges);
+        }
+        return status;
+    }
+
+    fn run_extraction(const diagnostics &diagnostics,
+                      unpack_statistics &statistics) const -> int {
         const let available = std::max(1U, std::thread::hardware_concurrency());
         const let worker_limit =
             jobs == 0 ? static_cast<std::size_t>(available) : jobs;
@@ -90,7 +141,7 @@ struct unpack_command {
                 const let destination =
                     std::filesystem::path{output_root} / paths.header.stem();
                 if (run_archive(paths, destination, worker_limit, diagnostics,
-                                *archives) != 0)
+                                *archives, statistics) != 0)
                     return 1;
             }
             return 0;
@@ -101,13 +152,23 @@ struct unpack_command {
         if (!key_override.empty())
             paths.key = key_override;
         return run_archive(paths, output_root, worker_limit, diagnostics,
-                           std::span{&paths, 1});
+                           std::span{&paths, 1}, statistics);
     }
 
     fn run_archive(const archive_paths &paths,
                    const std::filesystem::path &destination,
                    std::size_t worker_limit, const diagnostics &diagnostics,
-                   std::span<const archive_paths> inputs) const -> int {
+                   std::span<const archive_paths> inputs,
+                   unpack_statistics &statistics) const -> int {
+        let stage_started = std::chrono::steady_clock::now();
+        const let record = [&](double &seconds) {
+            if (!stats)
+                return;
+            const let now = std::chrono::steady_clock::now();
+            seconds +=
+                std::chrono::duration<double>(now - stage_started).count();
+            stage_started = now;
+        };
         const let header_path = paths.header.string();
         const let data_path = paths.data.string();
         const let key_path = paths.key.string();
@@ -116,6 +177,7 @@ struct unpack_command {
             load_ds2_header(header_path, key_path, worker_limit, diagnostics);
         if (!archive)
             return 1;
+        record(statistics.header_seconds);
 
         let error = std::error_code{};
         const let size = std::filesystem::file_size(data_path, error);
@@ -147,11 +209,12 @@ struct unpack_command {
         }
         const let plan =
             nuxe::plan_files(requests, data_path, size,
-                             nuxe::group_limits{64, 64ULL * 1024 * 1024});
+                             nuxe::group_limits{group_files, group_bytes});
         if (!plan) {
             diagnostics.report(plan.error(), output_path);
             return 1;
         }
+        record(statistics.planning_seconds);
 
         for (const let &entry : plan->entries) {
             for (const let &source : inputs) {
@@ -178,6 +241,7 @@ struct unpack_command {
             }
         }
 
+        record(statistics.preflight_seconds);
         const let worker_count = std::min(worker_limit, plan->groups.size());
         let workers = std::vector<nuxe::extraction_worker>{};
         workers.reserve(worker_count);
@@ -192,6 +256,7 @@ struct unpack_command {
             }
             workers.emplace_back(std::move(*worker));
         }
+        record(statistics.setup_seconds);
         for (const let &directory : plan->directories) {
             std::filesystem::create_directories(directory, error);
             if (error) {
@@ -200,13 +265,30 @@ struct unpack_command {
                 return 1;
             }
         }
+        record(statistics.directory_seconds);
         const let outcome =
             nuxe::extract_buffered(*plan, workers,
                                    replace ? nuxe::overwrite_policy::replace
                                            : nuxe::overwrite_policy::fail);
+        record(statistics.payload_seconds);
         if (!outcome) {
             diagnostics.report(outcome.error(), output_path);
             return 1;
+        }
+        if (stats) {
+            ++statistics.archives;
+            statistics.files += plan->entries.size();
+            statistics.groups += plan->groups.size();
+            statistics.keys.insert(plan->keys.begin(), plan->keys.end());
+            for (const let &entry : plan->entries) {
+                statistics.ranges += entry.encrypted_ranges.size();
+                let encrypted = std::uint64_t{};
+                for (const let &range : entry.encrypted_ranges)
+                    encrypted +=
+                        static_cast<std::uint64_t>(range.end - range.start);
+                statistics.encrypted_bytes += encrypted;
+                statistics.plain_bytes += entry.data_length - encrypted;
+            }
         }
 
         let files = std::size_t{};
@@ -250,6 +332,18 @@ struct unpack_command {
             ->add_option("--buffer-size", buffer_size,
                          "fixed buffer per worker in bytes (default: 1048576)")
             ->check(size_option());
+        command
+            ->add_option("--group-files", group_files,
+                         "experimental maximum files per group (default: 64)")
+            ->check(size_option());
+        command
+            ->add_option(
+                "--group-bytes", group_bytes,
+                "experimental maximum bytes per group (default: 67108864)")
+            ->check(size_option());
+        command->add_flag(
+            "--stats", stats,
+            "print extraction stage timings and counters to stderr");
         command
             ->add_option("--copy-mode", copying,
                          "plain-file copying: buffered (default), auto tries "
