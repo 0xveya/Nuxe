@@ -113,6 +113,7 @@ Useful `unpack` options:
 | `--buffer-size N` | Buffer bytes per worker. Defaults to 65536 (64 KiB). |
 | `--replace` | Replace existing output files. |
 | `--eat-all-cpu` | Keep inherited CPU and I/O priority instead of lowering it. |
+| `--stats` | Print stage timings, workload counts and copy counters to stderr. |
 
 Background CPU and I/O priority is the default. Buffers must be at least 16 bytes
 when extracting encrypted payloads.
@@ -156,10 +157,20 @@ mise run compiledb  # Regenerate clangd's compilation database
 
 ### Copying and performance
 
+Unpacking defaults to at most two workers and a 64 KiB buffer per worker.
 Buffered copying is the default. `unpack --copy-mode auto` opts into Linux
 `copy_file_range()` for unencrypted files, with buffered fallback when unsupported.
 Encrypted entries always use the buffered AES path. `--copy-mode buffered`
-explicitly selects the default for comparisons.
+explicitly selects the default for comparisons. `--cfr-min-size N` limits kernel
+copy attempts to plain files of at least N bytes (default: 0). An unavailable
+kernel syscall is remembered per worker; filesystem-specific failures retain
+buffered fallback.
+
+Use `--stats` for header, planning, input protection, worker setup, directory and
+payload timings, plus file/group/key/range counts and actual copy bytes/errors.
+CFR nanoseconds sum syscall durations across workers, so they can exceed elapsed
+time. `--group-files` and `--group-bytes` expose scheduling experiments; their
+defaults remain 64 files and 64 MiB.
 
 Use identical worker counts and buffer sizes, fresh outputs on the same
 filesystem, and repeat runs in alternating order. Cross-device copies may fall
