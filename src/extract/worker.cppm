@@ -30,6 +30,7 @@ struct worker_progress {
 struct extraction_worker {
     std::vector<std::byte> buffer;
     worker_progress progress;
+    std::optional<payload_file> input;
     std::optional<file_cipher> cipher;
     std::optional<key_id> active_key;
     copy_mode copying = copy_mode::buffered;
@@ -49,9 +50,13 @@ fn prepare_worker(const extraction_plan &plan, std::size_t buffer_bytes,
             (!entry.key || buffer_bytes < 16))
             return std::unexpected(extraction_error::invalid_worker_buffer);
     }
+    let input = open_archive(plan.data_path);
+    if (!input)
+        return std::unexpected(input.error());
     let worker = extraction_worker{
         .buffer = std::vector<std::byte>(buffer_bytes),
         .progress = {},
+        .input = std::move(*input),
         .cipher = {},
         .active_key = {},
         .copying = copying,
@@ -81,9 +86,9 @@ fn run_group(const extraction_plan &plan, const extraction_group &group,
         return std::unexpected(operation_cancelled{});
     if (entries.empty())
         return {};
-    let input = open_archive(plan.data_path);
-    if (!input)
-        return std::unexpected(input.error());
+    if (!worker.input)
+        return std::unexpected(extraction_error::invalid_group);
+    const let &input = worker.input;
     for (const let &entry : entries) {
         if (entry.data_offset > input->size() ||
             entry.data_length > input->size() - entry.data_offset)
