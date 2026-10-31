@@ -157,6 +157,52 @@ mise run compiledb  # Regenerate clangd's compilation database
 
 ### Copying and performance
 
+#### Cold-cache Scholar extraction
+
+Full-game extraction: 16,289 files, 18.17 GB. Three release trials per
+configuration on an Intel i5-11500H and Samsung MZVLB512HBJQ NVMe, with source
+and output on the same Btrfs filesystem (`compress=zstd:3`). Each trial used a
+fresh output directory; all BDT payload pages were evicted and verified
+nonresident with `mincore()` before timing. This measures cold payload data,
+not a reboot or cold filesystem metadata.
+
+| Extractor | Median elapsed | Range |
+| --- | ---: | ---: |
+| Original C# extraction engine | 13.89 s | 12.82–13.99 s |
+| C++ buffered | 12.10 s | 11.41–12.59 s |
+| C++ auto, plain files ≥1 MiB | 11.45 s | 11.22–12.11 s |
+
+```mermaid
+xychart-beta
+    x-axis ["Original C#", "C++ buffered", "C++ auto ≥1 MiB"]
+    y-axis "Median elapsed (seconds, lower is better)" 0 --> 16
+    bar [13.89, 12.10, 11.45]
+```
+
+The thresholded auto configuration used 17.5% less elapsed time than the C#
+engine in these trials. **The under-10-second cold-cache target is not met.**
+The C++ ranges overlap, so the smaller auto gain needs care when generalizing
+to other drives or filesystems. Buffered copying remains the default.
+
+C++ measurements used two workers, 64 KiB buffers and `--eat-all-cpu`, matching
+the C# engine's inherited priority. To select the measured auto configuration:
+
+```bash
+./build/linux/x86_64/release/nuxe unpack "$GAME" --output "$OUT" \
+    --jobs 2 --buffer-size 65536 --eat-all-cpu \
+    --copy-mode auto --cfr-min-size 1048576
+```
+
+The comparison runs the unchanged original C# extraction engine from revision
+`16d94fcd379f45721047a0c2b7b743e84b4fa08b` through a small Linux console adapter
+on .NET 10.0.2. It includes dictionary lookup and original filenames, while this
+fork uses numbered paths. It does not measure the Windows WPF application.
+All 16,289 extracted payloads were verified against the original engine with
+SHA-256. Elapsed times include process startup and file closure, without an
+`fsync`; they do not measure durable storage completion.
+
+#### Extraction controls
+
 Unpacking defaults to at most two workers and a 64 KiB buffer per worker.
 Buffered copying is the default. `unpack --copy-mode auto` opts into Linux
 `copy_file_range()` for unencrypted files, with buffered fallback when unsupported.
