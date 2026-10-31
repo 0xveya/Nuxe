@@ -1,45 +1,28 @@
 # nuxe
 
-A Linux-focused fork of [JKAnderson/Nuxe](https://github.com/JKAnderson/Nuxe).
-Mostly a side project because I'm bored and want to make archive I/O fast.
+A C++ fork of [JKAnderson/Nuxe](https://github.com/JKAnderson/Nuxe) for Linux.
+I'm making this for fun, mostly to mess around with C++ and archive I/O.
+It isn't a superior version of Nuxe or a replacement for the original. The
+original does much more, and this isn't guaranteed to be faster on your machine.
 
 ## Current support
 
-**DS2 only for now.** The table compares the original Nuxe's supported games
-with this C++ fork. Original platform labels describe archive formats, not the
-platforms this fork runs on.
+**DS2 only for now.** You can inspect headers, extract one file, or unpack a game
+directory, including RSA headers and AES payloads. Scholar of the First Sin has
+been checked against the original unpacker. The original DS2 uses the same code
+path but hasn't been checked against a full installation here.
 
-| Game / archive version | Original Nuxe unpacking | Inspect JSON | Extract one file | Unpack game directory | Decrypt headers / payloads | Original filenames |
-| --- | --- | --- | --- | --- | --- | --- |
-| Armored Core V (PS3, Xbox 360) | Yes | No | No | No | No | No |
-| Armored Core: Verdict Day (PS3, Xbox 360) | Yes | No | No | No | No | No |
-| Armored Core VI (PC) | Yes | No | No | No | No | No |
-| Dark Souls (PC, PS3, Xbox 360) | Yes | No | No | No | No | No |
-| Dark Souls Remastered (Switch) | Yes | No | No | No | No | No |
-| Dark Souls II (PC) | Yes | Yes* | Yes* | Yes* | Yes* | No |
-| Dark Souls II: Scholar of the First Sin (PC) | Yes | Yes | Yes | Yes | Yes | No |
-| Dark Souls III (PC) | Yes | No | No | No | No | No |
-| Elden Ring (PC) | Yes | No | No | No | No | No |
-| Elden Ring Nightreign (PC) | Yes | No | No | No | No | No |
-| Sekiro, including Digital Artwork & Mini Soundtrack (PC) | Yes | No | No | No | No | No |
-| Steel Battalion: Heavy Armor (Xbox 360) | Yes | No | No | No | No | No |
-
-All feature columns after “Original Nuxe unpacking” describe this fork.
-“No” means not implemented. DS2 extraction supports RSA headers and AES payloads;
-outputs use numbered bucket/file paths. Scholar of the First Sin has been tested
-against the original unpacker. *The original DS2 uses the implemented DS2 path but
-hasn't been validated against a full game installation here.
+There are no original filenames yet: outputs use numbered bucket/file paths.
+Other games and executable patching aren't implemented. Use the original Nuxe
+if you need its wider game support and features.
 
 Extraction uses parallel workers with bounded buffers and buffered copying by
 default. Linux kernel copying is optional through `--copy-mode auto`, with
-buffered fallback. Executable patching isn't implemented. Browser CPU profiling
+buffered fallback. Browser CPU profiling
 is available through mise; some C++ module names remain mangled.
 
-**Linux only.** Windows support isn't planned right now. I don't have a Windows
-machine, and I don't know Windows I/O well enough to promise a proper port.
-Maybe a rough Windows version happens later, or someone sends a PR. Windows PRs
-are welcome, but for now this is a Linux project. Other platforms aren't
-supported either.
+**Linux only.** I don't have a Windows machine or plans for a Windows port.
+Windows PRs are welcome, though.
 
 ## Build from source
 
@@ -157,7 +140,7 @@ mise run compiledb  # Regenerate clangd's compilation database
 
 ### Copying and performance
 
-#### Cold-cache Scholar extraction
+#### Some cold-cache Scholar timings
 
 Full-game extraction: 16,289 files, 18.17 GB. Three release trials per
 configuration on an Intel i5-11500H and Samsung MZVLB512HBJQ NVMe, with source
@@ -179,10 +162,11 @@ xychart-beta
     bar [13.89, 12.10, 11.45]
 ```
 
-The thresholded auto configuration used 17.5% less elapsed time than the C#
-engine in these trials. **The under-10-second cold-cache target is not met.**
-The C++ ranges overlap, so the smaller auto gain needs care when generalizing
-to other drives or filesystems. Buffered copying remains the default.
+I tried getting a cold unpack under ten seconds and haven't managed it. The
+extra I/O experiments didn't give a reliable improvement, so I'm leaving the
+simple buffered path as the default. These are just measurements from this
+machine, not a claim that C++ or this fork is better. The C++ ranges overlap,
+and another drive or filesystem could give different results.
 
 C++ measurements used two workers, 64 KiB buffers and `--eat-all-cpu`, matching
 the C# engine's inherited priority. To select the measured auto configuration:
