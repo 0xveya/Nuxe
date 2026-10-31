@@ -1,6 +1,7 @@
 export module nuxe;
 
 export import nuxe.error;
+export import nuxe.archive.ds2;
 export import nuxe.match;
 export import nuxe.io.mapped_file;
 export import nuxe.io.reader;

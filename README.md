@@ -127,6 +127,32 @@ header decryption only; the selected payload is copied by one worker.
 All commands support `--help`. Errors go to stderr and return a nonzero exit
 status; inspection JSON and successful extraction summaries go to stdout.
 
+## Calling it from C++
+
+Link the `nuxe-core` Xmake target and `import nuxe.archive.ds2;` (or `import nuxe;`).
+There is no UI framework or C ABI involved. Load the header once, browse
+`archive->header().buckets`, then extract whichever bucket/file the user selects:
+
+```cpp
+import nuxe.archive.ds2;
+
+auto archive = nuxe::ds2_archive::open("LqMapEbl.bhd", "LqMapEbl.bdt",
+                                      "LqMapKeyCode.pem");
+auto extracted = archive.and_then([](const nuxe::ds2_archive &source) {
+    return source.extract_file(0, 0, "selected.bin");
+});
+```
+
+Both calls return `nuxe::result<T>` (`std::expected<T, nuxe::error>`). Extraction
+returns the number of bytes written, creates parent directories, and leaves
+existing files alone unless `file_extraction_options::overwrite` is set to
+`overwrite_policy::replace`. The API doesn't print or set process priorities.
+Keep the source files unchanged while using the archive.
+
+These calls block, so a UI should run them on its own worker thread. Both accept
+a `std::stop_token`; cancellation is reported as `nuxe::operation_cancelled`.
+Opening also accepts a header worker count, and extraction accepts a buffer size.
+
 ## Development
 
 The rewrite uses C++23 native modules, Clang, and Xmake. The original C# source is

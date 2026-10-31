@@ -53,6 +53,19 @@ struct diagnostics {
         match(failure)(
             case_(nuxe::extraction_error, error) {
                 switch (error) {
+                case nuxe::extraction_error::invalid_worker_count:
+                    report("worker count must be nonzero", {}, argument);
+                    break;
+                case nuxe::extraction_error::invalid_bucket_index:
+                    report("bucket index is out of range",
+                           "use a bucket index from inspect", argument);
+                    break;
+                case nuxe::extraction_error::invalid_file_index:
+                    report("file index is out of range",
+                           "use a file index within the selected bucket from "
+                           "inspect",
+                           argument);
+                    break;
                 case nuxe::extraction_error::encrypted_payload:
                     report("encrypted payload extraction is not implemented",
                            {}, argument);

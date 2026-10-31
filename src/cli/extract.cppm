@@ -2,22 +2,16 @@ module;
 
 #include <CLI/CLI.hpp>
 #include <cstddef>
-#include <filesystem>
 #include <print>
 #include <string>
-#include <system_error>
 
 #include <nuxe/macros.h>
 
 export module nuxe.cli.extract;
 
 import nuxe.cli.diagnostics;
-import nuxe.cli.header;
 import nuxe.cli.options;
-import nuxe.extract.plan;
-import nuxe.extract.planner;
-import nuxe.extract.worker;
-import nuxe.format.bhd5;
+import nuxe.archive.ds2;
 
 export namespace nuxe::cli {
 
@@ -34,76 +28,21 @@ struct extract_command {
 
     fn run(const diagnostics &diagnostics) const -> int {
         const let archive =
-            load_ds2_header(header_path, key_path, jobs, diagnostics);
-        if (!archive)
-            return 1;
-        if (bucket >= archive->buckets.size()) {
-            diagnostics.report("bucket index is out of range",
-                               "use a bucket index from inspect", "--bucket");
+            nuxe::ds2_archive::open(header_path, data_path, key_path, jobs);
+        if (!archive) {
+            diagnostics.report(archive.error(), header_path);
             return 1;
         }
-        const let &entries = archive->buckets[bucket].files;
-        if (file >= entries.size()) {
-            diagnostics.report(
-                "file index is out of range",
-                "use a file index within the selected bucket from inspect",
-                "--file");
-            return 1;
-        }
-
-        let error = std::error_code{};
-        const let size = std::filesystem::file_size(data_path, error);
-        if (error) {
-            diagnostics.report("could not inspect data archive",
-                               error.message(), data_path);
-            return 1;
-        }
-        const let plan =
-            nuxe::plan_file(entries[file], data_path, size, output_path);
-        if (!plan) {
-            diagnostics.report(plan.error(), output_path);
-            return 1;
-        }
-        const let &destination = plan->entries[0].output_path;
-        for (const let &input : {header_path, key_path}) {
-            if (input.empty())
-                continue;
-            const let same =
-                std::filesystem::equivalent(input, destination, error);
-            if (same) {
-                diagnostics.report("output would overwrite an input file", {},
-                                   output_path);
-                return 1;
-            }
-            if (error && error != std::errc::no_such_file_or_directory) {
-                diagnostics.report("could not check output destination",
-                                   error.message(), output_path);
-                return 1;
-            }
-        }
-        let worker = nuxe::prepare_worker(*plan, buffer_size);
-        if (!worker) {
-            diagnostics.report(worker.error(), output_path);
-            return 1;
-        }
-        for (const let &directory : plan->directories) {
-            std::filesystem::create_directories(directory, error);
-            if (error) {
-                diagnostics.report("could not create output directory",
-                                   error.message(), directory.string());
-                return 1;
-            }
-        }
-        const let result =
-            nuxe::run_group(*plan, plan->groups[0], *worker,
-                            replace ? nuxe::overwrite_policy::replace
-                                    : nuxe::overwrite_policy::fail);
+        const let result = archive->extract_file(
+            bucket, file, output_path,
+            {.buffer_size = buffer_size,
+             .overwrite = replace ? nuxe::overwrite_policy::replace
+                                  : nuxe::overwrite_policy::fail});
         if (!result) {
             diagnostics.report(result.error(), output_path);
             return 1;
         }
-        std::println("extracted {} bytes to {}", worker->progress.bytes_written,
-                     plan->entries[0].output_path.string());
+        std::println("extracted {} bytes to {}", *result, output_path);
         return 0;
     }
 

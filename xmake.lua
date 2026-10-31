@@ -35,16 +35,29 @@ add_requires("nlohmann_json_modules 3.12.0", { system = false })
 set_warnings("all", "extra")
 add_cxxflags("-Wpedantic", "-Wconversion", "-Wshadow", { tools = { "gcc", "clang" } })
 
+target("nuxe-core")
+    set_kind("static")
+    if is_mode("releasedbg") then
+        set_strip("none")
+        add_cxxflags("-fno-omit-frame-pointer", { tools = { "gcc", "clang" } })
+    end
+    add_packages("openssl3", { public = true })
+    add_syslinks("pthread", { public = true })
+    add_files("src/**.cppm", { public = true })
+    remove_files("src/cli/**.cppm")
+    add_includedirs("include", { public = true })
+    add_headerfiles("include/(nuxe/*.h)")
+
 target("nuxe")
     set_kind("binary")
+    add_deps("nuxe-core")
     if is_mode("releasedbg") then
         set_strip("none")
         add_cxxflags("-fno-omit-frame-pointer", { tools = { "gcc", "clang" } })
     end
     set_rundir(os.projectdir())
-    add_packages("cli11", "nlohmann_json_modules", "openssl3")
-    add_syslinks("pthread")
-    add_files("src/**.cppm", { public = true })
-    add_files("src/**.cpp")
+    add_packages("cli11", "nlohmann_json_modules")
+    add_files("src/cli/**.cppm", { public = true })
+    add_files("src/main.cpp")
     add_includedirs("include")
     add_headerfiles("include/(nuxe/*.h)")

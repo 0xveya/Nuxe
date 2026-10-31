@@ -77,6 +77,9 @@ enum class extraction_error {
     invalid_destination,
     invalid_worker_buffer,
     invalid_group,
+    invalid_worker_count,
+    invalid_bucket_index,
+    invalid_file_index,
 };
 
 using error =
